@@ -2,9 +2,11 @@
 std = "lua51"
 exclude_files = { ".release/" }
 
--- 120 for code, but tooltip and comment prose reads better unwrapped than
--- folded at an arbitrary column.
-max_line_length = 130
+-- The long lines here are tooltip prose, not dense code. luacheck types a
+-- line by its last token, so a line ending in a closing quote and comma
+-- counts as code however much of it is text, which makes the string-specific
+-- limit useless. Longest real line is 192.
+max_code_line_length = 200
 max_string_line_length = false
 max_comment_line_length = false
 
