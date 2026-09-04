@@ -707,7 +707,8 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         end
 
     elseif event == "PLAYER_LOGIN" then
-        math.randomseed(time())   -- unseeded Lua repeats the same sequence every session
+        -- no math.randomseed here: the client already seeds math.random, and
+        -- Blizzard removed randomseed from the addon environment
         SendHello(true)
         print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-pass |cffff0000off|r, corpse announce "
             .. "|cffff0000off|r - left-click the minimap button to arm auto-pass.")

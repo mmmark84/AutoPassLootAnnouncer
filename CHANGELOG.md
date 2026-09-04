@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.1] - 2026-09-04
+
+### Fixed
+- Login no longer throws `attempt to call a nil value`. The PLAYER_LOGIN handler
+  seeded `math.random`, but Blizzard removed `math.randomseed` from the addon
+  environment and the client seeds it already. The error aborted the rest of the
+  handler, so the hello broadcast never went out and peer discovery had to wait
+  for the next roster update.
+
 ## [1.1.0] - 2026-09-04
 
 ### Added
