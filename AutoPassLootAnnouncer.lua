@@ -534,19 +534,57 @@ local function BuildPanel()
     edit:SetPoint("TOPLEFT", 96, -450)
     edit:SetSize(190, 20)
     edit:SetAutoFocus(false)
-    edit:SetScript("OnEnterPressed", function(self)
-        db.prefix = self:GetText()
+    -- Commit on focus lost, not only on Enter. Clicking Test does not press
+    -- Enter for you, and reverting the box there threw away what you typed
+    -- while leaving it on screen, so the prefix looked applied but was not.
+    edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    edit:SetScript("OnEditFocusLost", function(self) db.prefix = self:GetText() end)
+    edit:SetScript("OnEscapePressed", function(self)
+        self:SetText(db.prefix)   -- Escape is the one way to discard an edit
         self:ClearFocus()
     end)
-    edit:SetScript("OnEditFocusLost", function(self) self:SetText(db.prefix) end)
     panel.edit = edit
+
+    -- Ask the client for the link instead of writing an item string by hand.
+    -- A hand-written one is short of the fields this client emits, and the
+    -- server drops a chat message carrying a malformed link without a word,
+    -- so Test did nothing in a group while printing fine when solo.
+    local TEST_ITEM = 32235   -- Cursed Vision of Sargeras
+
+    local function TestSay(link)
+        if not db.announce then
+            print("|cff66ccffAPLA|r announce to chat is off, so this only prints here")
+        elseif not ResolveChannel() then
+            print(("|cff66ccffAPLA|r cap is %s and you are not in a group, so this only prints here")
+                :format(CHANNEL_NAME[db.channel] or "?"))
+        end
+        SayList({ link }, true)
+    end
+
+    local function TestAnnounce()
+        local link = select(2, GetItemInfo(TEST_ITEM))
+        if link then
+            TestSay(link)
+            return
+        end
+        -- That call asked the server for the item, so give it a moment.
+        C_Timer.After(1, function()
+            local retry = select(2, GetItemInfo(TEST_ITEM))
+            if retry then
+                TestSay(retry)
+            else
+                print("|cff66ccffAPLA|r could not load the test item, click Test again")
+            end
+        end)
+    end
 
     local test = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     test:SetSize(80, 22)
     test:SetPoint("BOTTOMRIGHT", -12, 12)
     test:SetText("Test")
     test:SetScript("OnClick", function()
-        SayList({ "|cffa335ee|Hitem:32235::::::::70:::::|h[Cursed Vision of Sargeras]|h|r" }, true)
+        edit:ClearFocus()   -- commit a half-typed prefix so the test uses it
+        TestAnnounce()
     end)
 end
 

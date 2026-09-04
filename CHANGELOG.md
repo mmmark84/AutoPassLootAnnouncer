@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Chat prefix is kept when you click away from the field, not only when you
+  press Enter. Clicking Test committed nothing, so a freshly typed prefix was
+  discarded while still showing in the box. Escape now discards it instead.
+- The Test button asks the client for the item link rather than using a
+  hand-written one. The old link was short of the fields this client emits and
+  the server drops a chat message carrying a malformed link, so Test did
+  nothing at all in a party or raid while printing fine when solo.
+- Test now says when it can only print locally, either because announcing to
+  chat is off or because the channel cap is unreachable while solo.
+
 ## [1.0.0] - 2026-09-04
 
 First public release. The addon has been in use in-game before this point,
