@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.1] - 2026-09-04
 
 ### Fixed
 - Chat prefix is kept when you click away from the field, not only when you
