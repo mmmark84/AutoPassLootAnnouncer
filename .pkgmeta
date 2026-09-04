@@ -13,3 +13,5 @@ ignore:
   - .luacheckrc
   - .editorconfig
   - .gitattributes
+  - .gitignore
+  - .pkgmeta
