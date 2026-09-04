@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0] - 2026-09-04
+
+### Removed
+- The "Also announce when I open a corpse" option and the loot-window announce
+  path behind it, along with `/apla corpse`. It only ever helped people who kept
+  Blizzard's Pass on Loot option on, which the addon exists to replace, and it
+  doubled up with the roll window whenever you were the one looting.
+- The "Only one of us announces" option and `/apla coop`. The single-announcer
+  election is now always on, which is what it was set to by default anyway.
+  Hello messages still carry the old flag so peers on 1.1.1 keep working.
+
 ## [1.1.1] - 2026-09-04
 
 ### Fixed

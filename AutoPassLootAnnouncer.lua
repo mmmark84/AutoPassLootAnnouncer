@@ -3,13 +3,11 @@ local ADDON_NAME = ...
 --[[ AutoPassLootAnnouncer
      Announces what drops the moment it drops, and (optionally) auto-passes every roll.
 
-     Two independent announce paths:
-       1) START_LOOT_ROLL  -> requires Blizzard's "Pass on Loot" option to be OFF.
-                              The only way to learn about a drop the instant it drops.
-       2) LOOT_READY       -> works even with Pass on Loot ON, but only when *you*
-                              open the corpse. Off at every login.
+     Announcing hangs off START_LOOT_ROLL, which requires Blizzard's "Pass on Loot"
+     option to be OFF. It is the only way to learn about a drop the instant it drops,
+     and it reports the kill whoever ends up opening the corpse.
 
-     Auto-pass and corpse announce are always OFF at login, deliberately.
+     Auto-pass is always OFF at login, deliberately.
 
      Minimap button:  left click = arm/disarm auto-pass, right click = settings, drag = move
                       green P = armed, silver P = normal rolls
@@ -26,10 +24,8 @@ local defaults = {
     minQuality   = 3,      -- announce threshold: 2=green 3=blue 4=epic
     -- actions[quality + 1] = -1 leave / 0 pass / 1 need / 2 greed. Built in
     -- ADDON_LOADED because a table in `defaults` would be shared by reference.
-    fromCorpse   = false,  -- also announce when you open a corpse; forced off at every login
     prefix       = "Drop:",
     pepe         = false,  -- prepend a random happy pepe to every announce
-    coop         = true,   -- when several of us run this, only one announces
     debug        = false,  -- /apla debug: log every roll decision
     minimapAngle = 200,
     minimapHide  = false,
@@ -113,16 +109,6 @@ end
 local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
-local seenSource   = {}   -- [key]    = GetTime(), corpses already announced
-local rollSeen     = {}   -- [itemID] = GetTime(), announced from a roll window
-local corpseSeen   = {}   -- [itemID] = GetTime(), announced from a corpse
-local lootAnnounced = false
-
--- an item can reach us down both paths for the same kill, in either order:
--- corpse first (you open the body, then the roll pops) or roll first.
-local function CrossPathDupe(tbl, itemID)
-    return itemID and tbl[itemID] and (GetTime() - tbl[itemID]) < 120
-end
 
 ----------------------------------------------------------------
 -- Output
@@ -220,11 +206,9 @@ local function ProcessRoll(rollID, tries)
 
     Dbg("roll %d: link=%s quality=%s tries=%d", rollID, tostring(link), tostring(quality), tries)
 
-    local itemID = link and link:match("item:(%d+)")
-    if link and not CrossPathDupe(corpseSeen, itemID) and (quality or 99) >= db.minQuality then
+    if link and (quality or 99) >= db.minQuality then
         Queue(link)
     end
-    if itemID then rollSeen[itemID] = GetTime() end
 
     if not db.autopass then
         Dbg("not armed, leaving roll %d alone", rollID)
@@ -250,6 +234,8 @@ end
 ----------------------------------------------------------------
 local COMM_PREFIX = "APLAnnounce"
 local peers = {}          -- [name] = { seen = GetTime(), willing = bool, coop = bool }
+                          -- coop is only ever false for a peer on an older version,
+                          -- back when announcing alone could be switched off
 local lastHello = 0
 
 local function Me() return UnitName("player") end
@@ -274,8 +260,9 @@ function SendHello(force)
     local now = GetTime()
     if not force and (now - lastHello) < 3 then return end
     lastHello = now
-    -- willing: this copy would announce at all. coop: it defers to an election.
-    Comm(("H:%s:%s"):format(db.announce and 1 or 0, db.coop and 1 or 0))
+    -- willing: this copy would announce at all. The second field is the old
+    -- opt-out flag, still sent as 1 so copies on older versions can read us.
+    Comm(("H:%s:1"):format(db.announce and 1 or 0))
 end
 
 -- Everyone runs the same election over the same roster, so no negotiation is
@@ -292,7 +279,6 @@ function Announcer()
 end
 
 function IsAnnouncer()
-    if not db.coop then return true end          -- opted out of coordination
     local a = Announcer()
     return a == nil or a == Me()
 end
@@ -346,11 +332,10 @@ local function ButtonTooltip(self)
         GameTooltip:AddLine(ActionSummary(), 1, 1, 1, true)
     end
     GameTooltip:AddDoubleLine("Announcing to", ChannelSummary())
-    if db.coop and next(peers) then
+    if next(peers) then
         local a = Announcer()
         GameTooltip:AddDoubleLine("Announcer", (a == Me()) and "|cff00ff00you|r" or ("|cffffff00" .. tostring(a) .. "|r"))
     end
-    GameTooltip:AddDoubleLine("Corpse announce", db.fromCorpse and "|cff00ff00on|r" or "|cffff0000off|r")
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine("|cffeda55fLeft click|r arm/disarm auto-pass", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fRight click|r settings", 1, 1, 1)
@@ -440,7 +425,7 @@ end
 
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 540)
+    panel:SetSize(340, 488)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -467,15 +452,7 @@ local function BuildPanel()
         "Off = print to your own chat frame only, nothing is sent to the group.",
         function(v) db.announce = v; SendHello(true) end)
 
-    panel.coop = MakeCheck(panel, "APLACheckCoop", "Only one of us announces", 16, -86,
-        "When several people in the group run this addon, they elect a single announcer so the drop is only posted once. Turn this off to always announce yourself.",
-        function(v) db.coop = v; SendHello(true) end)
-
-    panel.corpse = MakeCheck(panel, "APLACheckCorpse", "Also announce when I open a corpse", 16, -112,
-        "Only useful if you keep Blizzard's Pass on Loot checkbox on. Doubles up with the roll window when you are the one looting. Off at every login.",
-        function(v) db.fromCorpse = v end)
-
-    panel.minimap = MakeCheck(panel, "APLACheckMinimap", "Show minimap button", 16, -138,
+    panel.minimap = MakeCheck(panel, "APLACheckMinimap", "Show minimap button", 16, -86,
         nil,
         function(v)
             db.minimapHide = not v
@@ -499,16 +476,16 @@ local function BuildPanel()
         return sl
     end
 
-    panel.chSlider = MakeSlider("APLAChannelSlider", -178, 1, 4, "Say", "Yell",
+    panel.chSlider = MakeSlider("APLAChannelSlider", -126, 1, 4, "Say", "Yell",
         "Announce up to: ", function(v) return CHANNEL_NAME[v] end,
         function(v) db.channel = v end)
     panel.chSlider.tooltipText = "The widest channel to use. It steps down to whatever is actually available: set to Raid, you get raid in a raid and party in a party."
 
-    panel.slider = MakeSlider("APLAQualitySlider", -222, 0, 5, "Poor", "Legendary",
+    panel.slider = MakeSlider("APLAQualitySlider", -170, 0, 5, "Poor", "Legendary",
         "Announce: ", MinLabel, function(v) db.minQuality = v end)
 
     panel.summary = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    panel.summary:SetPoint("TOPLEFT", 24, -416)
+    panel.summary:SetPoint("TOPLEFT", 24, -364)
     panel.summary:SetWidth(292)
     panel.summary:SetJustifyH("LEFT")
 
@@ -523,20 +500,20 @@ local function BuildPanel()
     panel.UpdateGrid = UpdateGrid
 
     local gridHead = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    gridHead:SetPoint("TOPLEFT", 24, -248)
+    gridHead:SetPoint("TOPLEFT", 24, -196)
     gridHead:SetText("What to do with each quality")
     gridHead.tooltipText = "Window = do nothing, so the roll window stays on screen for you to answer."
 
     local COLX = { 150, 195, 240, 285 }
     for i, a in ipairs(ACTIONS) do
         local h = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        h:SetPoint("TOP", panel, "TOPLEFT", COLX[i] + 8, -264)
+        h:SetPoint("TOP", panel, "TOPLEFT", COLX[i] + 8, -212)
         h:SetText(a.label)
     end
 
     panel.radios = {}
     for q = 0, 5 do
-        local y = -280 - q * 22
+        local y = -228 - q * 22
         local name = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         name:SetPoint("TOPLEFT", 30, y - 2)
         name:SetText(QualityLabel(q))
@@ -554,11 +531,11 @@ local function BuildPanel()
     end
 
     local prefixLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    prefixLabel:SetPoint("TOPLEFT", 24, -454)
+    prefixLabel:SetPoint("TOPLEFT", 24, -402)
     prefixLabel:SetText("Chat prefix")
 
     local edit = CreateFrame("EditBox", "APLAPrefixEdit", panel, "InputBoxTemplate")
-    edit:SetPoint("TOPLEFT", 96, -450)
+    edit:SetPoint("TOPLEFT", 96, -398)
     edit:SetSize(190, 20)
     edit:SetAutoFocus(false)
     -- Commit on focus lost, not only on Enter. Clicking Test does not press
@@ -605,7 +582,7 @@ local function BuildPanel()
         end)
     end
 
-    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -502,
+    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -450,
         "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
@@ -623,8 +600,6 @@ end
 function RefreshPanel()
     panel.pass:SetChecked(db.autopass)
     panel.announce:SetChecked(db.announce)
-    panel.coop:SetChecked(db.coop)
-    panel.corpse:SetChecked(db.fromCorpse)
     panel.minimap:SetChecked(not db.minimapHide)
     panel.pepe:SetChecked(db.pepe)
     panel.chSlider:SetValue(db.channel)
@@ -642,9 +617,6 @@ f:RegisterEvent("ADDON_LOADED")
 f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("START_LOOT_ROLL")
 f:RegisterEvent("CONFIRM_LOOT_ROLL")
-f:RegisterEvent("LOOT_READY")
-f:RegisterEvent("LOOT_OPENED")
-f:RegisterEvent("LOOT_CLOSED")
 f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 
@@ -671,10 +643,12 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             db.needMax, db.greedMax, db.passMax = nil, nil, nil
         end
 
-        -- these two are deliberately NOT remembered between sessions, so they can
+        -- deliberately NOT remembered between sessions, so automated rolling can
         -- never be left armed by accident
-        db.autopass   = false
-        db.fromCorpse = false
+        db.autopass = false
+
+        -- dropped settings, cleared out of a saved file written by an older version
+        db.fromCorpse, db.coop = nil, nil
 
         BuildButton()
         BuildPanel()
@@ -710,8 +684,8 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- no math.randomseed here: the client already seeds math.random, and
         -- Blizzard removed randomseed from the addon environment
         SendHello(true)
-        print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-pass |cffff0000off|r, corpse announce "
-            .. "|cffff0000off|r - left-click the minimap button to arm auto-pass.")
+        print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-pass |cffff0000off|r"
+            .. " - left-click the minimap button to arm auto-pass.")
 
     elseif event == "START_LOOT_ROLL" then
         ProcessRoll(arg1, 0)
@@ -724,46 +698,6 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             ConfirmLootRoll(rollID, rollType)
             autoRolls[rollID] = nil
         end
-
-    elseif event == "LOOT_READY" or event == "LOOT_OPENED" then
-        if not db.fromCorpse or lootAnnounced then return end
-        local n = GetNumLootItems() or 0
-        if n == 0 then return end
-
-        local now = GetTime()
-        local links, sig = {}, {}
-        for i = 1, n do
-            local link = GetLootSlotLink(i)   -- nil for money slots
-            if link then
-                sig[#sig + 1] = link
-                local itemID = link:match("item:(%d+)")
-                local quality = QualityOf(link)
-                if not CrossPathDupe(rollSeen, itemID) and (quality or 99) >= db.minQuality then
-                    links[#links + 1] = link
-                    if itemID then corpseSeen[itemID] = now end
-                end
-            end
-        end
-        if #sig == 0 then return end
-
-        -- LOOT_READY and LOOT_OPENED each fire several times per corpse, and the slot
-        -- list changes as you take things, so announce at most once per loot window.
-        -- Key on the source GUID when the client gives us one (it is often nil at
-        -- LOOT_READY), otherwise on the item list itself.
-        local guid = GetLootSourceInfo and GetLootSourceInfo(1)
-        local key = guid or table.concat(sig)
-        lootAnnounced = true
-        if seenSource[key] and (now - seenSource[key]) < 60 then return end
-        seenSource[key] = now
-
-        for k, t in pairs(seenSource) do if now - t > 600 then seenSource[k] = nil end end
-        for k, t in pairs(rollSeen)   do if now - t > 600 then rollSeen[k]   = nil end end
-        for k, t in pairs(corpseSeen) do if now - t > 600 then corpseSeen[k] = nil end end
-
-        if #links > 0 then SayList(links) end
-
-    elseif event == "LOOT_CLOSED" then
-        lootAnnounced = false
     end
 end)
 
@@ -788,9 +722,6 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         else
             print("|cff66ccffAPLA|r /apla channel say|party|raid|yell")
         end
-    elseif cmd == "corpse" then
-        db.fromCorpse = not db.fromCorpse
-        print("|cff66ccffAPLA|r announce from corpse: " .. tostring(db.fromCorpse))
     elseif cmd == "quality" and tonumber(val) then
         db.minQuality = tonumber(val)
     elseif cmd == "set" then
@@ -803,10 +734,6 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         else
             print("|cff66ccffAPLA|r /apla set <0-5> <window|pass|greed|need>")
         end
-    elseif cmd == "coop" then
-        db.coop = not db.coop
-        SendHello(true)
-        print("|cff66ccffAPLA|r coordinate: " .. tostring(db.coop))
     elseif cmd == "who" then
         SendHello(true)
         print("|cff66ccffAPLA|r announcer: " .. tostring(Announcer()))

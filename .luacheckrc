@@ -28,8 +28,7 @@ globals = {
 read_globals = {
     "Ambiguate", "C_ChatInfo", "C_Timer", "ConfirmLootRoll", "CreateFrame",
     "GameTooltip", "GetCursorPosition", "GetItemInfo", "GetLootRollItemInfo",
-    "GetLootRollItemLink", "GetLootRollTimeLeft", "GetLootSlotLink",
-    "GetLootSourceInfo", "GetNumGroupMembers", "GetNumLootItems", "GetTime",
+    "GetLootRollItemLink", "GetLootRollTimeLeft", "GetNumGroupMembers", "GetTime",
     "ITEM_QUALITY_COLORS", "IsInGroup", "IsInRaid", "Minimap",
     "RegisterAddonMessagePrefix", "RollOnLoot", "SendAddonMessage",
     "SendChatMessage", "UIParent", "UISpecialFrames",

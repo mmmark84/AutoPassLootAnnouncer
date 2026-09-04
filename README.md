@@ -11,7 +11,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 - **Announces on the roll**, not on the corpse, so you see drops even when someone else loots the body
 - **One line per item**, to your choice of channel
 - **Per-quality roll actions** — need, greed, pass, or leave the window up, set independently for each item quality
-- **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once
+- **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
 - **Disarmed at every login**, so automated rolling can never be left on by accident
 - **Pepe mode**, which puts a random cheerful pepe in front of every announcement
 
@@ -75,9 +75,7 @@ this one and nothing breaks without it.
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |
-| `/apla corpse` | Toggle announcing from the loot window |
 | `/apla pepe` | Toggle pepe mode |
-| `/apla coop` | Toggle single-announcer coordination |
 | `/apla who` | Show the elected announcer and all peers |
 | `/apla debug` | Log every roll decision |
 | `/apla minimap` | Show or hide the minimap button |
