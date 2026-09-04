@@ -50,7 +50,7 @@ addon is developed against:
 
 | Checked | Value |
 | --- | --- |
-| Install folder | `E:\World of Warcraft\_anniversary_` |
+| Client folder | `_anniversary_` |
 | `.flavor.info` | `wow_anniversary` |
 | `## Interface` in the toc | `20505` (2.5.5, Burning Crusade) |
 | Toc suffix other addons ship for it | `_TBC.toc` |

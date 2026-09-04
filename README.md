@@ -74,7 +74,7 @@ Two settings: **Announce** sets the minimum quality, **Announce up to** sets the
 The repository root **is** the addon folder. Point the game at it with a directory junction instead of copying files:
 
 ```cmd
-mklink /J "E:\World of Warcraft\_anniversary_\Interface\AddOns\AutoPassLootAnnouncer" "C:\projecten\Autopasslootannouncer\AutoPassLootAnnouncer"
+mklink /J "<your WoW folder>\_anniversary_\Interface\AddOns\AutoPassLootAnnouncer" "<your clone>"
 ```
 
 Edit in VS Code, then `/reload` in game. Recommended extensions are in `.vscode/extensions.json`; the WoW API one gives you completion for the Blizzard functions.
