@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.1] - 2026-09-04
+## [1.1.0] - 2026-09-04
 
 ### Added
 - Pepe mode: prefixes each announcement with a random cheerful pepe from
