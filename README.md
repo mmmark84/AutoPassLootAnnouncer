@@ -13,6 +13,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 - **Per-quality roll actions** — need, greed, pass, or leave the window up, set independently for each item quality
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once
 - **Disarmed at every login**, so automated rolling can never be left on by accident
+- **Pepe mode**, which puts a random cheerful pepe in front of every announcement
 
 ## Screenshots
 
@@ -53,6 +54,17 @@ Two settings: **Announce** sets the minimum quality, **Announce up to** sets the
 | Raid | raid | party | own chat frame |
 | Yell | yell | yell | yell |
 
+### Pepe mode
+
+Pepe mode prepends a random happy pepe to each announcement, picked from 24 of
+the cheerful ones in [Twitch Emotes 2.0](https://www.curseforge.com/wow/addons/twitch-emotes-v2).
+It never repeats the emote it used last.
+
+What goes out on the wire is the emote's name, so it becomes a picture only for
+readers who run Twitch Emotes themselves. Everyone else sees the word, e.g.
+`PepePogO Drop: [Cursed Vision of Sargeras]`. That addon is not a dependency of
+this one and nothing breaks without it.
+
 ### Slash commands
 
 | Command | Effect |
@@ -64,6 +76,7 @@ Two settings: **Announce** sets the minimum quality, **Announce up to** sets the
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |
 | `/apla corpse` | Toggle announcing from the loot window |
+| `/apla pepe` | Toggle pepe mode |
 | `/apla coop` | Toggle single-announcer coordination |
 | `/apla who` | Show the elected announcer and all peers |
 | `/apla debug` | Log every roll decision |

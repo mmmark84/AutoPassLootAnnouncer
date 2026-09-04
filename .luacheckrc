@@ -33,5 +33,5 @@ read_globals = {
     "ITEM_QUALITY_COLORS", "IsInGroup", "IsInRaid", "Minimap",
     "RegisterAddonMessagePrefix", "RollOnLoot", "SendAddonMessage",
     "SendChatMessage", "UIParent", "UISpecialFrames",
-    "UnitGUID", "UnitName", "tinsert", "wipe",
+    "UnitGUID", "UnitName", "tinsert", "time", "wipe",
 }

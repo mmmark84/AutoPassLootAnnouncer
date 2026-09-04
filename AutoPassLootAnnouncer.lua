@@ -28,6 +28,7 @@ local defaults = {
     -- ADDON_LOADED because a table in `defaults` would be shared by reference.
     fromCorpse   = false,  -- also announce when you open a corpse; forced off at every login
     prefix       = "Drop:",
+    pepe         = false,  -- prepend a random happy pepe to every announce
     coop         = true,   -- when several of us run this, only one announces
     debug        = false,  -- /apla debug: log every roll decision
     minimapAngle = 200,
@@ -38,6 +39,27 @@ local db   -- declared before anything that reads it, or it resolves to a nil gl
 
 local QUALITY_NAME = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
+
+-- Pepe mode. Twitch Emotes 2.0 swaps these words for pictures on the reading
+-- end, so anyone without that addon sees the bare word instead. Picked by
+-- looking at the artwork rather than trusting the names, since plenty of
+-- cheerful-sounding ones (PepeHands, PepeCry, PepegaSad) are miserable.
+local PEPE_HAPPY = {
+    "PepeD", "PepeJAM", "PepePogO", "PogChampPepe", "Pepeggers", "PepeXD",
+    "PepeLaugh", "PepeLaff", "PepeLMAO", "PepegaLaugh", "pepeGiggle", "Pepega",
+    "PepeThumbsUp", "pepeW", "pepeWave", "pepeOK", "PepeOuuuhh", "PepeSmile",
+    "pajaPepe", "PepeAyy", "PepeHeart", "PepeLove", "PepeHug", "pepeKingLove",
+}
+
+local lastPepe
+local function RandomPepe()
+    local pick = PEPE_HAPPY[math.random(#PEPE_HAPPY)]
+    if pick == lastPepe then
+        pick = PEPE_HAPPY[math.random(#PEPE_HAPPY)]   -- one re-roll, so it rarely doubles up
+    end
+    lastPepe = pick
+    return pick
+end
 
 local function QualityLabel(v)
     if v < 0 then return "|cff808080nothing|r" end
@@ -137,8 +159,13 @@ function SayList(links, force)
         return
     end
     for _, link in ipairs(links) do
-        local prefix = db.prefix or ""
-        Say(prefix ~= "" and (prefix .. " " .. link) or link)
+        -- pepe first, then your prefix, then the item. Each part is space
+        -- separated because Twitch Emotes only matches whole words.
+        local parts = {}
+        if db.pepe then tinsert(parts, RandomPepe()) end
+        if db.prefix and db.prefix ~= "" then tinsert(parts, db.prefix) end
+        tinsert(parts, link)
+        Say(table.concat(parts, " "))
     end
 end
 
@@ -578,6 +605,11 @@ local function BuildPanel()
         end)
     end
 
+    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -502,
+        "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
+            .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
+        function(v) db.pepe = v end)
+
     local test = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     test:SetSize(80, 22)
     test:SetPoint("BOTTOMRIGHT", -12, 12)
@@ -594,6 +626,7 @@ function RefreshPanel()
     panel.coop:SetChecked(db.coop)
     panel.corpse:SetChecked(db.fromCorpse)
     panel.minimap:SetChecked(not db.minimapHide)
+    panel.pepe:SetChecked(db.pepe)
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
     panel.UpdateGrid()
@@ -674,6 +707,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         end
 
     elseif event == "PLAYER_LOGIN" then
+        math.randomseed(time())   -- unseeded Lua repeats the same sequence every session
         SendHello(true)
         print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-pass |cffff0000off|r, corpse announce "
             .. "|cffff0000off|r - left-click the minimap button to arm auto-pass.")
@@ -778,6 +812,9 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         for name, info in pairs(peers) do
             print(("  %s  willing=%s coop=%s"):format(name, tostring(info.willing), tostring(info.coop)))
         end
+    elseif cmd == "pepe" then
+        db.pepe = not db.pepe
+        print("|cff66ccffAPLA|r pepe mode: " .. tostring(db.pepe))
     elseif cmd == "debug" then
         db.debug = not db.debug
         print("|cff66ccffAPLA|r debug: " .. tostring(db.debug))

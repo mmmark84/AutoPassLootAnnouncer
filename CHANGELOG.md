@@ -2,6 +2,11 @@
 
 ## [1.0.1] - 2026-09-04
 
+### Added
+- Pepe mode: prefixes each announcement with a random cheerful pepe from
+  Twitch Emotes 2.0, chosen from 24 hand-picked happy ones and never the same
+  one twice in a row. Off by default. Toggle in the panel or with `/apla pepe`.
+
 ### Fixed
 - Chat prefix is kept when you click away from the field, not only when you
   press Enter. Clicking Test committed nothing, so a freshly typed prefix was
