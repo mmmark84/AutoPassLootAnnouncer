@@ -16,13 +16,16 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 ## Screenshots
 
-| Options | Minimap |
-| --- | --- |
-| ![Options panel](Media/screenshots/options-panel.png) | ![Minimap button](Media/screenshots/minimap-button.png) |
+![Options panel](Media/screenshots/options-panel.png)
 
 ## Usage
 
-Left-click the minimap button to arm or disarm automated rolling — the coin turns green when armed. Right-click opens the options.
+Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options.
+
+| | |
+| --- | --- |
+| <img src="Media/icon-idle.png" width="48"> | Idle, automated rolling off |
+| <img src="Media/icon-armed.png" width="48"> | Armed, the arrows turn green |
 
 For the addon to see rolls at all, Blizzard's own **Pass on Loot** option must be **off** (Interface → Combat). That option suppresses the roll server side and no addon can work around it.
 
@@ -91,7 +94,7 @@ CI runs both on every push. See `docs/RELEASING.md` for how the CurseForge side 
 AutoPassLootAnnouncer.toc    metadata, load order
 AutoPassLootAnnouncer.lua    the addon
 Textures/                    minimap icons (32-bit uncompressed TGA, 64x64)
-Media/                       screenshots and icon sources, excluded from the package
+Media/                       screenshots and icon art, excluded from the package
 docs/                        release notes for maintainers
 .pkgmeta                     tells the CurseForge packager what to ship
 ```
