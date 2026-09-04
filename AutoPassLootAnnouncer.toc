@@ -1,0 +1,14 @@
+## Interface: 20505
+## Title: Auto Pass Loot Announcer
+## Notes: Announces group loot drops the moment they drop, and rolls need/greed/pass for you by item quality.
+## Author: Bikkie
+## Version: @project-version@
+## SavedVariables: AutoPassLootAnnouncerDB
+## IconTexture: Interface\AddOns\AutoPassLootAnnouncer\Textures\pass-on
+## X-License: MIT
+## X-Website: https://github.com/mmmark84/AutoPassLootAnnouncer
+## X-Category: Raid Mods
+# Uncomment once the CurseForge project exists, the packager needs it to upload:
+# ## X-Curse-Project-ID: 000000
+
+AutoPassLootAnnouncer.lua

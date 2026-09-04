@@ -1,0 +1,27 @@
+name: Release
+
+# Tag a commit (git tag v1.3.0 && git push --tags) and this builds the zip,
+# attaches it to a GitHub release, and uploads to CurseForge once the
+# X-Curse-Project-ID line in the .toc is filled in and CF_API_KEY is set.
+on:
+  push:
+    tags: ["*"]
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the packager reads git history for the changelog
+
+      - name: Package and release
+        uses: BigWigsMods/packager@master
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+        with:
+          # -g sets the game flavour: bcc matches the Anniversary client
+          # (wow_anniversary, Interface 20505). See docs/RELEASING.md.
+          # Add -d to build a zip without uploading anywhere.
+          args: -g bcc

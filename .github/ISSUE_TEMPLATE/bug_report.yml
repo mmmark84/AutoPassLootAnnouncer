@@ -1,0 +1,34 @@
+name: Bug report
+description: Something behaved unexpectedly in game
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Addon version
+      placeholder: "1.3.0"
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Game client
+      placeholder: "TBC Anniversary 2.5.5"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: debug
+    attributes:
+      label: Debug output
+      description: "Run /apla debug, reproduce it, and paste the lines here. /apla who helps for announcer problems."
+      render: text
+  - type: textarea
+    id: errors
+    attributes:
+      label: Lua errors
+      description: "With /console scriptErrors 1 or BugSack. Paste the full error."
+      render: text
