@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.1] - 2026-09-04
+
+### Fixed
+- Pepe mode no longer picks an animated pepe. Twitch Emotes animates one by
+  rewriting the whole chat line and calling `SetText` on it 30 times a second,
+  which tears down the links in that line while you point at one, so item
+  tooltips on a line carrying `PepeD` or `PepeJAM` would not stay up. Both are
+  out of the pool, leaving 22 still frames.
+
 ## [1.2.0] - 2026-09-04
 
 ### Removed

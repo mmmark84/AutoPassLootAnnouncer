@@ -56,9 +56,13 @@ Two settings: **Announce** sets the minimum quality, **Announce up to** sets the
 
 ### Pepe mode
 
-Pepe mode prepends a random happy pepe to each announcement, picked from 24 of
+Pepe mode prepends a random happy pepe to each announcement, picked from 22 of
 the cheerful ones in [Twitch Emotes 2.0](https://www.curseforge.com/wow/addons/twitch-emotes-v2).
 It never repeats the emote it used last.
+
+They are all still frames. Twitch Emotes animates an emote by rewriting the
+whole chat line 30 times a second, which stops an item tooltip on that line
+from settling, so the animated pepes are kept out of the pool.
 
 What goes out on the wire is the emote's name, so it becomes a picture only for
 readers who run Twitch Emotes themselves. Everyone else sees the word, e.g.

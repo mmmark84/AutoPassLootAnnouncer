@@ -40,11 +40,17 @@ local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
 -- end, so anyone without that addon sees the bare word instead. Picked by
 -- looking at the artwork rather than trusting the names, since plenty of
 -- cheerful-sounding ones (PepeHands, PepeCry, PepegaSad) are miserable.
+--
+-- Still frames only. Twitch Emotes animates an emote by rewriting the whole
+-- chat line and calling SetText on it 30 times a second, which tears down the
+-- links in that line as you are pointing at one, so the item tooltip never
+-- settles. It guards its own tel: links against that and nothing else. Only
+-- PepeD and PepeJAM of the ones below were animated, so both are gone.
 local PEPE_HAPPY = {
-    "PepeD", "PepeJAM", "PepePogO", "PogChampPepe", "Pepeggers", "PepeXD",
-    "PepeLaugh", "PepeLaff", "PepeLMAO", "PepegaLaugh", "pepeGiggle", "Pepega",
-    "PepeThumbsUp", "pepeW", "pepeWave", "pepeOK", "PepeOuuuhh", "PepeSmile",
-    "pajaPepe", "PepeAyy", "PepeHeart", "PepeLove", "PepeHug", "pepeKingLove",
+    "PepePogO", "PogChampPepe", "Pepeggers", "PepeXD", "PepeLaugh", "PepeLaff",
+    "PepeLMAO", "PepegaLaugh", "pepeGiggle", "Pepega", "PepeThumbsUp", "pepeW",
+    "pepeWave", "pepeOK", "PepeOuuuhh", "PepeSmile", "pajaPepe", "PepeAyy",
+    "PepeHeart", "PepeLove", "PepeHug", "pepeKingLove",
 }
 
 local lastPepe
