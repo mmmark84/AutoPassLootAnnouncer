@@ -29,7 +29,7 @@ for your guild automatically.
 ## Every release
 
 ```cmd
-git tag v1.3.0
+git tag v1.0.1
 git push --tags
 ```
 
@@ -41,7 +41,7 @@ The `Release` workflow then:
 - attaches the zip to a GitHub release
 - uploads it to CurseForge if the project ID and API key are both present
 
-Tag names become version numbers, so use `v1.3.0` style consistently.
+Tag names become version numbers, so keep the `vMAJOR.MINOR.PATCH` form consistently.
 
 ## Game flavour
 

@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-09-04
+
+First public release. The addon has been in use in-game before this point,
+but this is the first version distributed as a package.
 
 ### Added
 - Per-quality roll actions: window, pass, greed or need for each item quality
