@@ -21,16 +21,22 @@ globals = {
     "SLASH_AUTOPASSLOOTANNOUNCER2",
     "AutoPassLootAnnouncerMinimapButton",
     "AutoPassLootAnnouncerPanel",
-    "SlashCmdList",   -- the addon writes its handler into this table
+    "AutoPassLootAnnouncerTracker",
+    "SlashCmdList",       -- the addon writes its handler into this table
+    "StaticPopupDialogs", -- and its login prompt into this one
 }
 
 -- WoW API surface this addon touches (read-only)
 read_globals = {
     "Ambiguate", "C_ChatInfo", "C_Timer", "ConfirmLootRoll", "CreateFrame",
+    "FauxScrollFrame_GetOffset", "FauxScrollFrame_OnVerticalScroll",
+    "FauxScrollFrame_Update", "GetCoinTextureString", "HandleModifiedItemClick",
+    "COPPER_AMOUNT", "GOLD_AMOUNT", "SILVER_AMOUNT", "LOOT_ITEM", "LOOT_ITEM_MULTIPLE",
+    "LOOT_ITEM_SELF", "LOOT_ITEM_SELF_MULTIPLE", "date",
     "GameTooltip", "GetCursorPosition", "GetItemInfo", "GetLootRollItemInfo",
     "GetLootRollItemLink", "GetLootRollTimeLeft", "GetNumGroupMembers", "GetTime",
     "ITEM_QUALITY_COLORS", "IsInGroup", "IsInRaid", "Minimap",
     "RegisterAddonMessagePrefix", "RollOnLoot", "SendAddonMessage",
-    "SendChatMessage", "UIParent", "UISpecialFrames",
+    "SendChatMessage", "StaticPopup_Show", "UIParent", "UISpecialFrames",
     "UnitGUID", "UnitName", "tinsert", "time", "wipe",
 }

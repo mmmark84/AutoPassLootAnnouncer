@@ -12,7 +12,8 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 - **One line per item**, to your choice of channel
 - **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
-- **Disarmed at every login**, so automated rolling can never be left on by accident
+- **Never armed between sessions** — automated rolling starts each login off, on, or behind a prompt, whichever you pick
+- **Drop tracker** — an optional log of everything that dropped this session and who won it, kept across logouts until you clear it
 - **Pepe mode**, which puts a random cheerful pepe in front of every announcement
 
 ## Screenshots
@@ -21,7 +22,15 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 ## Usage
 
-Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options.
+Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click opens the drop log.
+
+Armed is never carried between sessions. What happens at login is the **At login** button beside the "Roll automatically" checkbox — click it to cycle:
+
+| | |
+| --- | --- |
+| Off | Stays disarmed until you arm it yourself. The default |
+| On | Armed straight away |
+| Ask | A prompt each login, so it is never armed without you saying so |
 
 | | |
 | --- | --- |
@@ -67,6 +76,33 @@ The point of the split is that quality on its own is a poor guide to whether a d
 
 Bind-on-pickup prompts are only auto-confirmed for rolls the addon made itself. A prompt raised by your own click still waits for you.
 
+### Drop tracker
+
+Off by default. Turn it on with **Track drops** in the options, then **middle-click the minimap button** to open the log.
+
+A session lasts as long as you leave it. The log is saved between logins and emptied only by the **Clear** button, so a night of trash runs with a logout in the middle is still one list.
+
+Two tabs: **Everything**, and **Mine** for what the character you are on took. Mine is per character, not per account — a winner's name is the only thing that says whose a drop was, and the log is shared between your characters.
+
+| | |
+| --- | --- |
+| Non-stackable | One row per drop, with the winner's name |
+| Stackable | One row per item, with a running total, sorted to the top |
+| Nothing yet | A row that says `nobody` is a drop that was rolled but never picked up |
+
+Stacked rows sit above the rest in both tabs. They are the part of the list that stays the same length however long the night runs, so they belong where they can be read at a glance. Everything else follows, newest first.
+
+The window resizes from the grip in its bottom-right corner and remembers both size and position. Hovering a row shows the item tooltip; shift-clicking drops the link into whatever you are typing. The slider at the bottom sets how far down the log goes, and the header carries the session start and a running coin total.
+
+Rows come from `CHAT_MSG_LOOT`, which is the only thing the client sends that carries a winner's name or says how many of something changed hands. `START_LOOT_ROLL` adds a row too, but only for items that do not stack: it fires before anyone has won, so the row waits with no winner until a loot message fills it in. Stackables are left to the loot message alone, because counting them from both events would count them twice.
+
+Two things follow from that:
+
+- **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
+- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
+
+The log holds 500 rows and drops the oldest beyond that, which is far more than a night of trash once stackables have collapsed. It is shared across all your characters, like the rest of the addon's settings.
+
 ### Announcing
 
 Two settings: **Announce** sets the minimum quality, **Announce up to** sets the widest channel. The channel is a cap that steps down to whatever is available:
@@ -103,6 +139,9 @@ this one and nothing breaks without it.
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |
+| `/apla login <off\|on\|ask>` | What automated rolling does at login |
+| `/apla loot` | Open or close the drop log |
+| `/apla track` | Toggle drop tracking |
 | `/apla pepe` | Toggle pepe mode |
 | `/apla who` | Show the elected announcer and all peers |
 | `/apla debug` | Log every roll decision |

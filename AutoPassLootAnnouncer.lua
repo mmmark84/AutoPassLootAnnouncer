@@ -7,7 +7,8 @@ local ADDON_NAME = ...
      option to be OFF. It is the only way to learn about a drop the instant it drops,
      and it reports the kill whoever ends up opening the corpse.
 
-     Auto-pass is always OFF at login, deliberately.
+     Auto-pass is never remembered between sessions. What happens at login is
+     the "At login" setting: off, armed straight away, or a prompt each time.
 
      Minimap button:  left click = arm/disarm auto-pass, right click = settings, drag = move
                       green P = armed, silver P = normal rolls
@@ -27,6 +28,11 @@ local defaults = {
     -- `defaults` would be shared by reference.
     prefix       = "Drop:",
     pepe         = false,  -- prepend a random happy pepe to every announce
+    loginArm     = "off",  -- what automated rolling does at login: off / on / ask
+    track        = false,  -- keep a log of what dropped; off until you ask for it
+    trackMin     = 2,      -- log uncommon and better
+    -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
+    -- for the same reason the action tables are
     debug        = false,  -- /apla debug: log every roll decision
     minimapAngle = 200,
     minimapHide  = false,
@@ -35,6 +41,18 @@ local defaults = {
 local db   -- declared before anything that reads it, or it resolves to a nil global
 
 local QUALITY_NAME = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
+
+-- What automated rolling does at login. Armed is never carried between
+-- sessions, so this decides what happens each time rather than remembering.
+local LOGIN_ARM_ORDER = { "off", "on", "ask" }
+local LOGIN_ARM_LABEL = { off = "Off", on = "On", ask = "Ask" }
+
+local function NextLoginArm(cur)
+    for i, v in ipairs(LOGIN_ARM_ORDER) do
+        if v == cur then return LOGIN_ARM_ORDER[i % #LOGIN_ARM_ORDER + 1] end
+    end
+    return LOGIN_ARM_ORDER[1]
+end
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
 
 -- Uncommon is the lowest quality the addon will answer for. Poor and common are
@@ -142,6 +160,12 @@ local ACTIONS = {
 }
 local ACTION_VERB = { [-1] = "roll window stays up", [0] = "passed", [1] = "NEEDED", [2] = "greeded" }
 
+-- The panel summary uses the column headers instead. The long verbs read well
+-- in a one-off line of chat, but three of them per row wrapped the summary into
+-- the chat prefix field below it.
+local ACTION_SHORT = {}
+for _, a in ipairs(ACTIONS) do ACTION_SHORT[a.value] = a.label end
+
 local function KindSummary(actions)
     local groups = {}
     for q = MIN_ACTION_QUALITY, 5 do
@@ -152,7 +176,7 @@ local function KindSummary(actions)
     local parts = {}
     for _, a in ipairs({ 1, 2, 0, -1 }) do
         if groups[a] then
-            parts[#parts + 1] = table.concat(groups[a], ", ") .. ": " .. ACTION_VERB[a]
+            parts[#parts + 1] = table.concat(groups[a], ", ") .. ": " .. ACTION_SHORT[a]
         end
     end
     return table.concat(parts, "  |  ")
@@ -184,6 +208,7 @@ end
 local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
+local LogDrop, LogMoney, ClearLog, RefreshTracker, ToggleTracker
 
 ----------------------------------------------------------------
 -- Output
@@ -322,6 +347,8 @@ local function ProcessRoll(rollID, tries)
         Queue(link)
     end
 
+    LogDrop(link)
+
     if not db.autopass then
         Dbg("not armed, leaving roll %d alone", rollID)
         return
@@ -409,9 +436,147 @@ local function PruneToGroup()
 end
 
 ----------------------------------------------------------------
+-- Drop tracker
+----------------------------------------------------------------
+-- A session lasts as long as you leave it: the log is saved between logins and
+-- emptied only by the Clear button, so a night of trash runs with a logout in
+-- the middle is still one list.
+--
+-- Rows come from CHAT_MSG_LOOT, which is the only thing that carries a winner's
+-- name or says how many of something changed hands. START_LOOT_ROLL adds a row
+-- too, but only for items that do not stack: it fires before anyone has won, so
+-- the row waits with no winner until a loot message fills it in, and a row that
+-- is never filled in is a drop nobody took. Stackables are left to the loot
+-- message alone, because counting them from both events would count them twice.
+local MAX_LOOT_ROWS     = 500
+local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
+
+-- "%s receives loot: %sx%d." and friends are format strings, not patterns, so
+-- escape everything magic and turn the placeholders into captures.
+local function ToPattern(fmt)
+    local out = fmt:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+    out = out:gsub("%%%%s", "(.+)")
+    out = out:gsub("%%%%d", "(%%d+)")
+    return "^" .. out .. "$"
+end
+
+-- The multiple forms are tried first. "receives loot: [Item]x3." also matches
+-- the singular pattern, with the "x3" swallowed into the item capture.
+local lootForms
+local function LootForms()
+    if not lootForms then
+        lootForms = {
+            { p = ToPattern(LOOT_ITEM_SELF_MULTIPLE), link = 1, count = 2 },
+            { p = ToPattern(LOOT_ITEM_SELF),          link = 1 },
+            { p = ToPattern(LOOT_ITEM_MULTIPLE),      who = 1, link = 2, count = 3 },
+            { p = ToPattern(LOOT_ITEM),               who = 1, link = 2 },
+        }
+    end
+    return lootForms
+end
+
+local function ParseLoot(msg)
+    for _, form in ipairs(LootForms()) do
+        local caps = { msg:match(form.p) }
+        local link = caps[form.link]
+        if link and link:find("|Hitem:", 1, true) then
+            local who = form.who and Ambiguate(caps[form.who], "none") or Me()
+            return link, tonumber(form.count and caps[form.count]) or 1, who
+        end
+    end
+end
+
+-- The money line reads "Your share of the loot is 1 Gold, 20 Silver." Rather
+-- than match the whole sentence, pick the three amounts out of wherever they
+-- land, which also copes with the ones that are left out when they are zero.
+local coinPats
+local function MoneyFromText(text)
+    if not coinPats then
+        local function amount(fmt)
+            local out = fmt:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+            return (out:gsub("%%%%d", "(%%d+)"))
+        end
+        coinPats = { amount(GOLD_AMOUNT), amount(SILVER_AMOUNT), amount(COPPER_AMOUNT) }
+    end
+    local g = tonumber(text:match(coinPats[1])) or 0
+    local s = tonumber(text:match(coinPats[2])) or 0
+    local c = tonumber(text:match(coinPats[3])) or 0
+    return g * 10000 + s * 100 + c
+end
+
+local function ItemID(link)
+    return link and tonumber(link:match("item:(%d+)"))
+end
+
+-- winner nil means "this dropped, nobody has won it yet"
+function LogDrop(link, count, winner)
+    if not db.track or not link then return end
+
+    local quality = QualityOf(link)
+    if not quality or quality < (db.trackMin or 2) then return end
+
+    local id = ItemID(link)
+    if not id then return end
+
+    local entries = db.loot.entries
+    -- a count above one settles it; otherwise ask the item itself
+    local stacks = (count and count > 1) or IsStackable(link) == true
+
+    if stacks then
+        if not winner then return end   -- wait for the loot message to say how many
+        for _, e in ipairs(entries) do
+            if e.id == id and e.stack then
+                e.count, e.t = e.count + count, time()
+                -- who took how many, so a stack can still be split back out per
+                -- character. A non-stackable row does not need this: it has one
+                -- winner and that name is already on it.
+                e.by = e.by or {}
+                e.by[winner] = (e.by[winner] or 0) + count
+                RefreshTracker()
+                return
+            end
+        end
+        entries[#entries + 1] = { id = id, link = link, count = count, stack = true,
+                                  by = { [winner] = count }, t = time() }
+    elseif winner then
+        -- fill the oldest row still waiting on this item, so names land in the
+        -- order the rolls did rather than backwards
+        for _, e in ipairs(entries) do
+            if e.id == id and not e.stack and not e.winner
+                and (time() - e.t) <= LOOT_MATCH_WINDOW then
+                e.winner = winner
+                RefreshTracker()
+                return
+            end
+        end
+        entries[#entries + 1] = { id = id, link = link, count = 1, winner = winner, t = time() }
+    else
+        entries[#entries + 1] = { id = id, link = link, count = 1, t = time() }
+    end
+
+    db.loot.started = db.loot.started or time()
+    while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
+    Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
+    RefreshTracker()
+end
+
+function LogMoney(copper)
+    if not db.track or not copper or copper <= 0 then return end
+    db.loot.money = (db.loot.money or 0) + copper
+    db.loot.started = db.loot.started or time()
+    RefreshTracker()
+end
+
+function ClearLog()
+    db.loot = { entries = {}, money = 0, started = time() }
+    RefreshTracker()
+    print("|cff66ccffAPLA|r drop log cleared, new session started")
+end
+
+----------------------------------------------------------------
 -- Minimap button
 ----------------------------------------------------------------
-local button, panel, RefreshPanel
+local button, panel, tracker, RefreshPanel
 
 -- built from the folder name, so renaming the addon folder can't break the paths
 local TEX_ON  = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Textures\\pass-on.tga"
@@ -436,6 +601,23 @@ local function ChannelSummary()
     return "|cff00ff00" .. ch:lower() .. "|r (up to " .. cap .. ")"
 end
 
+StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_ARM"] = {
+    text = "Auto Pass Loot Announcer\n\nArm automated rolling for this session?\n"
+        .. "While armed it answers loot rolls for you, by quality and bind type.",
+    button1 = "Arm it",
+    button2 = "Leave it off",
+    OnAccept = function()
+        db.autopass = true
+        UpdateButtonLook()
+        print("|cff66ccffAPLA|r auto-roll |cff00ff00armed|r")
+        if panel and panel:IsShown() then RefreshPanel() end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,   -- the low indices are the ones that pick up taint
+}
+
 local function ButtonTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("Auto Pass Loot Announcer")
@@ -451,6 +633,7 @@ local function ButtonTooltip(self)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine("|cffeda55fLeft click|r arm/disarm auto-pass", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fRight click|r settings", 1, 1, 1)
+    GameTooltip:AddLine("|cffeda55fMiddle click|r drop log", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fDrag|r move", 1, 1, 1)
     GameTooltip:Show()
 end
@@ -467,7 +650,7 @@ local function BuildButton()
     button:SetSize(31, 31)
     button:SetFrameStrata("MEDIUM")
     button:SetFrameLevel(8)
-    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
     button:RegisterForDrag("LeftButton")
     button:SetMovable(true)
 
@@ -506,6 +689,8 @@ local function BuildButton()
     button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
             if panel:IsShown() then panel:Hide() else RefreshPanel(); panel:Show() end
+        elseif mouseButton == "MiddleButton" then
+            ToggleTracker()
         else
             ToggleAutopass()
             ButtonTooltip(self)
@@ -545,6 +730,38 @@ local function Fill(tex, r, g, b, a)
     end
 end
 
+-- A flat block that fills and underlines when it is the one you are on. The
+-- caller paints it rather than the widget doing it itself, because the settings
+-- panel colours its tabs by quality and the loot log does not.
+local function MakeTab(parent, w, h, text)
+    local tb = CreateFrame("Button", nil, parent)
+    tb:SetSize(w, h)
+
+    tb.bg = tb:CreateTexture(nil, "BACKGROUND")
+    tb.bg:SetAllPoints()
+
+    tb.rule = tb:CreateTexture(nil, "ARTWORK")
+    tb.rule:SetPoint("BOTTOMLEFT")
+    tb.rule:SetPoint("BOTTOMRIGHT")
+    tb.rule:SetHeight(2)
+
+    tb.text = tb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tb.text:SetPoint("CENTER", 0, 1)
+    tb.text:SetText(text)
+
+    local hl = tb:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    Fill(hl, 1, 1, 1, 0.10)
+
+    return tb
+end
+
+local function PaintTab(tb, r, g, b, on)
+    Fill(tb.bg,   r, g, b, on and 0.30 or 0.06)
+    Fill(tb.rule, r, g, b, on and 1.00 or 0.00)
+    tb.text:SetTextColor(r, g, b, on and 1 or 0.5)
+end
+
 -- FontStrings take no mouse input, so anything that wants a tooltip gets an
 -- invisible frame laid over it.
 local function AttachTooltip(frame, title, lines)
@@ -560,9 +777,26 @@ local function AttachTooltip(frame, title, lines)
     frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+local function MakeSlider(parent, name, y, minv, maxv, low, high, caption, textFor, set)
+    local sl = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
+    sl:SetPoint("TOPLEFT", 24, y)
+    sl:SetWidth(280)
+    sl:SetMinMaxValues(minv, maxv)
+    sl:SetValueStep(1)
+    if sl.SetObeyStepOnDrag then sl:SetObeyStepOnDrag(true) end
+    _G[name .. "Low"]:SetText(low)
+    _G[name .. "High"]:SetText(high)
+    sl:SetScript("OnValueChanged", function(self, v)
+        v = math.floor(v + 0.5)
+        set(v)
+        _G[name .. "Text"]:SetText(caption .. textFor(v))
+    end)
+    return sl
+end
+
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 490)
+    panel:SetSize(340, 516)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -570,6 +804,12 @@ local function BuildPanel()
     panel:SetScript("OnDragStart", panel.StartMoving)
     panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
     panel:SetClampedToScreen(true)
+    -- Both of the addon's windows sit in one strata and raise on click. Left on
+    -- the default they inherit MEDIUM with frame levels handed out in creation
+    -- order, and overlapping them interleaves their children: the checkboxes
+    -- here drew straight through the loot log's background.
+    panel:SetFrameStrata("DIALOG")
+    panel:SetToplevel(true)
     panel:Hide()
     tinsert(UISpecialFrames, "AutoPassLootAnnouncerPanel")   -- Escape closes it
 
@@ -582,8 +822,26 @@ local function BuildPanel()
     title:SetText("Auto Pass Loot Announcer")
 
     panel.pass = MakeCheck(panel, "APLACheckPass", "Roll automatically", 16, -34,
-        "Master switch for the three sliders below. With need and greed set to None it just passes on everything, the same net effect as Blizzard's Pass on Loot checkbox. Off at every login.",
+        "Master switch for the grid below. With everything set to Pass it just passes on the lot, "
+            .. "the same net effect as Blizzard's Pass on Loot checkbox. Never carried between "
+            .. "sessions; the button beside this one decides what happens at login.",
         function(v) db.autopass = v; UpdateButtonLook() end)
+
+    -- Sits on the checkbox's own line rather than a row of its own, which keeps
+    -- it next to the thing it qualifies and leaves everything below where it is.
+    panel.loginArm = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    panel.loginArm:SetSize(120, 20)   -- ends at x=320, inside the frame's inset
+    panel.loginArm:SetPoint("TOPLEFT", 200, -33)
+    panel.loginArm:SetScript("OnClick", function()
+        db.loginArm = NextLoginArm(db.loginArm)
+        RefreshPanel()
+    end)
+    AttachTooltip(panel.loginArm, "At login", {
+        "What automated rolling does when you log in or reload. Click to cycle.",
+        "|cffffd100Off|r - stays disarmed until you arm it yourself.",
+        "|cffffd100On|r - armed straight away.",
+        "|cffffd100Ask|r - a prompt each time, so it is never on without you saying so.",
+    })
 
     panel.announce = MakeCheck(panel, "APLACheckAnnounce", "Announce to chat", 16, -60,
         "Off = print to your own chat frame only, nothing is sent to the group.",
@@ -596,29 +854,12 @@ local function BuildPanel()
             if v then button:Show() else button:Hide() end
         end)
 
-    local function MakeSlider(name, y, minv, maxv, low, high, caption, textFor, set)
-        local sl = CreateFrame("Slider", name, panel, "OptionsSliderTemplate")
-        sl:SetPoint("TOPLEFT", 24, y)
-        sl:SetWidth(280)
-        sl:SetMinMaxValues(minv, maxv)
-        sl:SetValueStep(1)
-        if sl.SetObeyStepOnDrag then sl:SetObeyStepOnDrag(true) end
-        _G[name .. "Low"]:SetText(low)
-        _G[name .. "High"]:SetText(high)
-        sl:SetScript("OnValueChanged", function(self, v)
-            v = math.floor(v + 0.5)
-            set(v)
-            _G[name .. "Text"]:SetText(caption .. textFor(v))
-        end)
-        return sl
-    end
-
-    panel.chSlider = MakeSlider("APLAChannelSlider", -126, 1, 4, "Say", "Yell",
+    panel.chSlider = MakeSlider(panel, "APLAChannelSlider", -126, 1, 4, "Say", "Yell",
         "Announce up to: ", function(v) return CHANNEL_NAME[v] end,
         function(v) db.channel = v end)
     panel.chSlider.tooltipText = "The widest channel to use. It steps down to whatever is actually available: set to Raid, you get raid in a raid and party in a party."
 
-    panel.slider = MakeSlider("APLAQualitySlider", -170, 0, 5, "Poor", "Legendary",
+    panel.slider = MakeSlider(panel, "APLAQualitySlider", -170, 0, 5, "Poor", "Legendary",
         "Announce: ", MinLabel, function(v) db.minQuality = v end)
 
     panel.summary = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -644,13 +885,10 @@ local function BuildPanel()
     function SelectQuality(q)
         panel.quality = q
         for tq, tb in pairs(panel.tabs) do
-            local c  = ITEM_QUALITY_COLORS[tq]
-            local on = tq == q
-            -- the active tab is filled in its own colour and underlined into
-            -- the rows below it; the rest sit back as flat dark blocks
-            Fill(tb.bg,   c.r, c.g, c.b, on and 0.30 or 0.06)
-            Fill(tb.rule, c.r, c.g, c.b, on and 1.00 or 0.00)
-            tb.text:SetTextColor(c.r, c.g, c.b, on and 1 or 0.5)
+            -- the active tab is filled in the quality's own colour and
+            -- underlined into the rows below it
+            local c = ITEM_QUALITY_COLORS[tq]
+            PaintTab(tb, c.r, c.g, c.b, tq == q)
         end
         UpdateGrid()
     end
@@ -680,26 +918,8 @@ local function BuildPanel()
     local TAB_W, TAB_H = 71, 24
     panel.tabs = {}
     for q = MIN_ACTION_QUALITY, 5 do
-        local tb = CreateFrame("Button", nil, panel)
-        tb:SetSize(TAB_W, TAB_H)
+        local tb = MakeTab(panel, TAB_W, TAB_H, QUALITY_NAME[q])
         tb:SetPoint("TOPLEFT", 22 + (q - MIN_ACTION_QUALITY) * (TAB_W + 3), -212)
-
-        tb.bg = tb:CreateTexture(nil, "BACKGROUND")
-        tb.bg:SetAllPoints()
-
-        tb.rule = tb:CreateTexture(nil, "ARTWORK")
-        tb.rule:SetPoint("BOTTOMLEFT")
-        tb.rule:SetPoint("BOTTOMRIGHT")
-        tb.rule:SetHeight(2)
-
-        tb.text = tb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        tb.text:SetPoint("CENTER", 0, 1)
-        tb.text:SetText(QUALITY_NAME[q])
-
-        local hl = tb:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        Fill(hl, 1, 1, 1, 0.10)
-
         tb:SetScript("OnClick", function() SelectQuality(q) end)
         panel.tabs[q] = tb
     end
@@ -808,6 +1028,11 @@ local function BuildPanel()
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
 
+    panel.track = MakeCheck(panel, "APLACheckTrack", "Track drops", 16, -474,
+        "Keeps a list of what dropped this session and who won it. Middle-click the minimap "
+            .. "button to open it. The list is kept between logins until you clear it.",
+        function(v) db.track = v; RefreshTracker() end)
+
     local test = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     test:SetSize(80, 22)
     test:SetPoint("BOTTOMRIGHT", -12, 12)
@@ -823,11 +1048,281 @@ function RefreshPanel()
     panel.announce:SetChecked(db.announce)
     panel.minimap:SetChecked(not db.minimapHide)
     panel.pepe:SetChecked(db.pepe)
+    panel.track:SetChecked(db.track)
+    panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
     panel.SelectQuality(panel.quality or 4)
     panel.edit:SetText(db.prefix)
     UpdateButtonLook()
+end
+
+----------------------------------------------------------------
+-- Tracker window
+----------------------------------------------------------------
+-- Row frames are built once and the list is drawn into them as it scrolls, so
+-- the only thing resizing has to do is decide how many of them are on show.
+-- Forty covers the tallest the window is allowed to get.
+local TRACK_ROW_H, MAX_TRACK_ROWS = 18, 40
+local TRACK_MIN_W, TRACK_MIN_H = 360, 286
+local TRACK_MAX_W, TRACK_MAX_H = 900, 800
+local TRACK_LIST_TOP = 78   -- below the title, the tabs and the stats line
+local TRACK_FOOTER   = 90   -- room for the threshold slider and the Clear button
+local UNKNOWN_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+local TRACK_VIEWS = {
+    { key = "all",  label = "Everything" },
+    { key = "mine", label = "Mine" },
+}
+
+-- Built fresh on each redraw rather than kept alongside the real log, so there
+-- is only ever one list to keep straight. A stack is split back out through the
+-- per-winner counts on the row.
+--
+-- The result comes back in the order it is drawn: stacked rows first, then the
+-- rest, newest first within each. Stacks are the part of the list that stays
+-- the same length however long the night runs, so they belong at the top where
+-- they can be read at a glance instead of scrolled past.
+local function ViewEntries()
+    local all  = db.loot.entries
+    local mine = tracker.view == "mine"
+    local me   = mine and Me() or nil
+
+    local stacks, singles = {}, {}
+    for i = #all, 1, -1 do   -- newest first
+        local e = all[i]
+        if e.stack then
+            if not mine then
+                stacks[#stacks + 1] = e
+            else
+                local n = e.by and e.by[me]
+                if n and n > 0 then
+                    stacks[#stacks + 1] =
+                        { id = e.id, link = e.link, count = n, stack = true, t = e.t }
+                end
+            end
+        elseif not mine or e.winner == me then
+            singles[#singles + 1] = e
+        end
+    end
+
+    for _, e in ipairs(singles) do stacks[#stacks + 1] = e end
+    return stacks
+end
+
+local function LayoutTracker()
+    if not tracker or not tracker.rows then return end
+
+    local w, h = tracker:GetWidth(), tracker:GetHeight()
+    local shown = math.floor((h - TRACK_LIST_TOP - TRACK_FOOTER) / TRACK_ROW_H)
+    if shown < 1 then shown = 1 end
+    if shown > MAX_TRACK_ROWS then shown = MAX_TRACK_ROWS end
+    tracker.visibleRows = shown
+
+    tracker.stats:SetWidth(w - 30)
+    tracker.scroll:SetSize(w - 50, shown * TRACK_ROW_H)   -- less the scrollbar
+    tracker.slider:SetWidth(w - 150)                      -- less the Clear button
+
+    local rowW = w - 70
+    for _, row in ipairs(tracker.rows) do
+        row:SetWidth(rowW)
+        row.text:SetWidth(rowW - 130)   -- icon, gap and the winner column
+    end
+
+    RefreshTracker()
+end
+
+local function BuildTracker()
+    tracker = CreateFrame("Frame", "AutoPassLootAnnouncerTracker", UIParent,
+        "BasicFrameTemplateWithInset")
+    tracker:SetSize(db.trackerSize and db.trackerSize.w or 440,
+                    db.trackerSize and db.trackerSize.h or 430)
+    tracker:SetPoint("CENTER")
+    tracker:SetMovable(true)
+    tracker:SetResizable(true)
+    -- SetResizeBounds is the modern name for the pair below it, guarded the way
+    -- SetObeyStepOnDrag and SetColorTexture are
+    if tracker.SetResizeBounds then
+        tracker:SetResizeBounds(TRACK_MIN_W, TRACK_MIN_H, TRACK_MAX_W, TRACK_MAX_H)
+    else
+        tracker:SetMinResize(TRACK_MIN_W, TRACK_MIN_H)
+        tracker:SetMaxResize(TRACK_MAX_W, TRACK_MAX_H)
+    end
+    tracker:EnableMouse(true)
+    tracker:RegisterForDrag("LeftButton")
+    tracker:SetScript("OnDragStart", tracker.StartMoving)
+    tracker:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, rel, x, y = self:GetPoint()
+        db.trackerPos = { point = point, rel = rel, x = x, y = y }
+    end)
+    tracker:SetClampedToScreen(true)
+    tracker:SetFrameStrata("DIALOG")   -- same strata as the settings panel, see there
+    tracker:SetToplevel(true)
+    tracker:Hide()
+    tinsert(UISpecialFrames, "AutoPassLootAnnouncerTracker")   -- Escape closes it
+
+    if db.trackerPos then
+        tracker:ClearAllPoints()
+        tracker:SetPoint(db.trackerPos.point, UIParent, db.trackerPos.rel,
+            db.trackerPos.x, db.trackerPos.y)
+    end
+
+    local title = tracker:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", 0, -6)
+    title:SetText("Session loot")
+
+    -- "Mine" is this character, not the account. The log is shared between your
+    -- characters and a winner's name is the only thing that says whose a drop
+    -- was, so it can only ever answer per character.
+    local function SelectView(key)
+        tracker.view = key
+        db.trackerView = key
+        for i, v in ipairs(TRACK_VIEWS) do
+            PaintTab(tracker.tabs[i], 1, 0.82, 0, v.key == key)
+        end
+        local bar = _G["APLATrackerScrollScrollBar"]
+        if bar then bar:SetValue(0) end   -- a new list starts at the top
+        RefreshTracker()
+    end
+
+    tracker.tabs = {}
+    for i, v in ipairs(TRACK_VIEWS) do
+        local tb = MakeTab(tracker, 104, 22, v.label)
+        tb:SetPoint("TOPLEFT", 14 + (i - 1) * 107, -32)
+        tb:SetScript("OnClick", function() SelectView(v.key) end)
+        tracker.tabs[i] = tb
+    end
+
+    tracker.stats = tracker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    tracker.stats:SetPoint("TOPLEFT", 14, -58)
+    tracker.stats:SetJustifyH("LEFT")
+
+    local scroll = CreateFrame("ScrollFrame", "APLATrackerScroll", tracker,
+        "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 12, -TRACK_LIST_TOP)
+    scroll:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, TRACK_ROW_H, RefreshTracker)
+    end)
+    tracker.scroll = scroll
+
+    tracker.rows = {}
+    for i = 1, MAX_TRACK_ROWS do
+        local row = CreateFrame("Button", nil, tracker)
+        row:SetHeight(TRACK_ROW_H)
+        row:SetPoint("TOPLEFT", 14, -TRACK_LIST_TOP - (i - 1) * TRACK_ROW_H)
+
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(14, 14)
+        row.icon:SetPoint("LEFT", 0, 0)
+
+        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.text:SetPoint("LEFT", 20, 0)
+        row.text:SetJustifyH("LEFT")
+
+        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who:SetPoint("RIGHT", -4, 0)
+        row.who:SetWidth(100)
+        row.who:SetJustifyH("RIGHT")
+
+        local hl = row:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        Fill(hl, 1, 1, 1, 0.08)
+
+        row:SetScript("OnEnter", function(self)
+            if not self.link then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(self.link)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- shift-click drops the link into whatever you are typing, the same way
+        -- clicking an item anywhere else in the UI does
+        row:SetScript("OnClick", function(self)
+            if self.link then HandleModifiedItemClick(self.link) end
+        end)
+
+        row:Hide()
+        tracker.rows[i] = row
+    end
+
+    -- the threshold lives here rather than in the settings panel: this is the
+    -- window where you notice the list filling up with things you do not want
+    tracker.slider = MakeSlider(tracker, "APLATrackSlider", 0, 0, 5, "Poor", "Legendary",
+        "Log: ", MinLabel, function(v) db.trackMin = v end)
+    tracker.slider:ClearAllPoints()   -- bottom-anchored, so resizing leaves it alone
+    tracker.slider:SetPoint("BOTTOMLEFT", 24, 52)
+
+    local clear = CreateFrame("Button", nil, tracker, "UIPanelButtonTemplate")
+    clear:SetSize(90, 22)
+    clear:SetPoint("BOTTOMRIGHT", -26, 12)   -- clear of the resize grip
+    clear:SetText("Clear")
+    clear.tooltipText = "Empties the log and starts a new session."
+    clear:SetScript("OnClick", function() ClearLog() end)
+
+    local grip = CreateFrame("Button", nil, tracker)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -6, 6)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function() tracker:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function()
+        tracker:StopMovingOrSizing()
+        db.trackerSize = { w = tracker:GetWidth(), h = tracker:GetHeight() }
+        LayoutTracker()
+    end)
+
+    tracker:SetScript("OnSizeChanged", LayoutTracker)
+    tracker:SetScript("OnShow", function() RefreshTracker() end)
+    SelectView(db.trackerView == "mine" and "mine" or "all")
+    LayoutTracker()
+end
+
+function RefreshTracker()
+    if not tracker or not tracker:IsShown() then return end
+
+    local entries = ViewEntries()
+    local n = #entries
+    local shown = tracker.visibleRows or 1
+
+    local when = db.loot.started and date("%d %b %H:%M", db.loot.started) or "nothing yet"
+    tracker.stats:SetText(("%d %s since %s          %s%s"):format(
+        n, n == 1 and "line" or "lines", when,
+        GetCoinTextureString(db.loot.money or 0),
+        db.track and "" or "   |cffff8000(tracking is off)|r"))
+
+    FauxScrollFrame_Update(tracker.scroll, n, shown, TRACK_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(tracker.scroll)
+
+    for i, row in ipairs(tracker.rows) do
+        local e = (i <= shown) and entries[offset + i] or nil   -- already in draw order
+        if e then
+            row.link = e.link
+            row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
+            row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r") or e.link)
+            if tracker.view == "mine" then
+                row.who:SetText(e.stack and "|cff808080your share|r" or "|cff808080yours|r")
+            elseif e.stack then
+                row.who:SetText("|cff808080stacked|r")
+            elseif e.winner then
+                row.who:SetText("|cffffff00" .. e.winner .. "|r")
+            else
+                row.who:SetText("|cff808080nobody|r")
+            end
+            row:Show()
+        else
+            row.link = nil
+            row:Hide()
+        end
+    end
+
+    tracker.slider:SetValue(db.trackMin or 2)
+end
+
+function ToggleTracker()
+    if not tracker then return end
+    if tracker:IsShown() then tracker:Hide() else tracker:Show() end
 end
 
 ----------------------------------------------------------------
@@ -840,6 +1335,8 @@ f:RegisterEvent("START_LOOT_ROLL")
 f:RegisterEvent("CONFIRM_LOOT_ROLL")
 f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
+f:RegisterEvent("CHAT_MSG_LOOT")
+f:RegisterEvent("CHAT_MSG_MONEY")
 
 f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" then
@@ -895,15 +1392,21 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             for q = 0, MIN_ACTION_QUALITY - 1 do db[kind.key][q] = nil end
         end
 
-        -- deliberately NOT remembered between sessions, so automated rolling can
-        -- never be left armed by accident
+        -- never remembered between sessions. Whether it comes back on is the
+        -- "At login" setting's business, handled at PLAYER_LOGIN once the rest
+        -- of the addon is up.
         db.autopass = false
 
         -- dropped settings, cleared out of a saved file written by an older version
         db.fromCorpse, db.coop, db.actions = nil, nil, nil
 
+        if type(db.loot) ~= "table" then db.loot = {} end
+        db.loot.entries = db.loot.entries or {}
+        db.loot.money   = db.loot.money or 0
+
         BuildButton()
         BuildPanel()
+        BuildTracker()
         UpdateButtonLook()
 
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
@@ -911,6 +1414,13 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         elseif RegisterAddonMessagePrefix then
             RegisterAddonMessagePrefix(COMM_PREFIX)
         end
+
+    elseif event == "CHAT_MSG_LOOT" then
+        local link, count, who = ParseLoot(arg1 or "")
+        if link then LogDrop(link, count, who) end
+
+    elseif event == "CHAT_MSG_MONEY" then
+        LogMoney(MoneyFromText(arg1 or ""))
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         PruneToGroup()
@@ -936,8 +1446,21 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- no math.randomseed here: the client already seeds math.random, and
         -- Blizzard removed randomseed from the addon environment
         SendHello(true)
-        print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-pass |cffff0000off|r"
-            .. " - left-click the minimap button to arm auto-pass.")
+
+        if db.loginArm == "on" then
+            db.autopass = true
+            UpdateButtonLook()
+        end
+
+        print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-roll "
+            .. (db.autopass and "|cff00ff00armed|r" or "|cffff0000off|r")
+            .. " - left-click the minimap button to change it.")
+
+        if db.loginArm == "ask" then
+            -- fired at PLAYER_LOGIN it lands behind the loading screen, so give
+            -- the client a moment to finish getting out of the way
+            C_Timer.After(3, function() StaticPopup_Show("AUTOPASSLOOTANNOUNCER_ARM") end)
+        end
 
     elseif event == "START_LOOT_ROLL" then
         ProcessRoll(arg1, 0)
@@ -1004,6 +1527,20 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         for name, info in pairs(peers) do
             print(("  %s  willing=%s coop=%s"):format(name, tostring(info.willing), tostring(info.coop)))
         end
+    elseif cmd == "login" then
+        if LOGIN_ARM_LABEL[val] then
+            db.loginArm = val
+            print("|cff66ccffAPLA|r at login: " .. LOGIN_ARM_LABEL[val])
+        else
+            print("|cff66ccffAPLA|r /apla login off|on|ask")
+        end
+    elseif cmd == "loot" then
+        ToggleTracker()
+        return
+    elseif cmd == "track" then
+        db.track = not db.track
+        print("|cff66ccffAPLA|r drop tracking: " .. tostring(db.track))
+        RefreshTracker()
     elseif cmd == "pepe" then
         db.pepe = not db.pepe
         print("|cff66ccffAPLA|r pepe mode: " .. tostring(db.pepe))

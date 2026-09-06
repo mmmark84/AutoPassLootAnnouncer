@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.5.0] - 2026-09-06
+
+### Added
+- An optional drop tracker. Middle-click the minimap button for a movable,
+  resizable log of what dropped this session and who won it, saved between
+  logins and emptied only by the Clear button, so a night of trash runs with a
+  logout in the middle is still one list. Off until you turn it on with
+  "Track drops" in the options, or `/apla track`.
+- Stackables collapse to one row with a running total; everything else gets a
+  row per drop with the winner behind it. A row reading `nobody` is a drop
+  that was rolled and never picked up.
+- Two tabs in the log: Everything, and Mine for what this character took. Mine
+  is per character rather than per account, because a winner's name is the only
+  thing that says whose a drop was and the log is shared between characters.
+  Stacked rows record who took how many, so a stack splits back out correctly.
+- Stacked rows sort to the top of both lists. They are the part of the log that
+  stays the same length however long the night runs, so they belong where they
+  can be read at a glance instead of scrolled past. Everything else follows,
+  newest first.
+- A running coin total for the session, from your share of the loot.
+- The log window resizes from the grip in its bottom-right corner, between
+  360x286 and 900x800, and remembers the size. Rows are built once and drawn
+  into as the list scrolls, so resizing only changes how many are on show.
+- Rows show the item tooltip on hover and link into chat on shift-click, and
+  the log has its own quality threshold so it does not fill with vendor junk.
+- `/apla loot` opens the log, `/apla track` toggles tracking.
+- Automated rolling has an "At login" setting: Off, On, or Ask. Ask puts a
+  prompt in front of you each login so it is never armed without you saying so,
+  and never left armed by accident either. Off keeps the old behaviour and is
+  still the default. The button sits beside the "Roll automatically" checkbox
+  and cycles on click; `/apla login off|on|ask` does the same.
+
+### Fixed
+- The two windows no longer draw through each other. Both were left on the
+  default frame strata, which handed them levels in creation order, so
+  overlapping them interleaved their children: the settings panel's checkboxes
+  and sliders drew straight over the loot log's background. They now share one
+  strata and whichever you click comes to the front.
+- The panel summary says Window, Pass, Greed and Need rather than spelling out
+  "roll window stays up". Three of the long form per row wrapped the summary
+  down into the chat prefix field, and the short names match the column
+  headings they describe.
+
+### Notes
+- The log is built from `CHAT_MSG_LOOT`, so it only ever contains what you
+  were present for, and it keeps working whether or not Blizzard's Pass on
+  Loot option is on. Matching a winner to a drop is a heuristic: the oldest
+  row for that item still waiting on a winner, within three minutes.
+- Capped at 500 rows, oldest dropped first. Shared across your characters,
+  like the rest of the addon's settings.
+
 ## [1.4.0] - 2026-09-06
 
 ### Added
