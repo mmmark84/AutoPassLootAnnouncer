@@ -10,7 +10,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 - **Announces on the roll**, not on the corpse, so you see drops even when someone else loots the body
 - **One line per item**, to your choice of channel
-- **Per-quality, per-bind roll actions** — need, greed, pass, or leave the window up, set separately for bind-on-pickup and bind-on-equip drops, so a BoE epic can be needed while the BoP one off the same boss waits for you
+- **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
 - **Disarmed at every login**, so automated rolling can never be left on by accident
 - **Pepe mode**, which puts a random cheerful pepe in front of every announcement
@@ -32,7 +32,17 @@ For the addon to see rolls at all, Blizzard's own **Pass on Loot** option must b
 
 ### Roll actions
 
-Uncommon gets one setting. Rare, epic and legendary get two each, one for bind-on-pickup and one for bind-on-equip:
+Pick a quality with the tabs, then set what happens to each **kind** of drop at that quality:
+
+| Kind | What lands here |
+| --- | --- |
+| BoP | Bind-on-pickup — tier tokens, boss gear, BoP reagents |
+| BoE | Bind-on-equip and does **not** stack — patterns, recipes, BoE weapons and armour |
+| BoE stack | Bind-on-equip and stacks — epic gems, motes and primals, void crystals, nether vortexes |
+
+Hovering a row name in the panel shows the same thing with examples.
+
+Each kind gets one action:
 
 | Action | Result |
 | --- | --- |
@@ -41,13 +51,19 @@ Uncommon gets one setting. Rare, epic and legendary get two each, one for bind-o
 | Greed | Greeds, and auto-confirms the bind-on-pickup prompt |
 | Need | Needs, auto-confirms, and prints a local notice |
 
-Poor and common are passed and have no setting of their own.
+**Poor and common are left alone entirely** — no auto-roll, the window stays up exactly as it would without the addon running. Uncommon, rare, epic and legendary each get the same three rows.
 
-Greens are not split by bind type — nobody sorts greens that way — so the one row covers both and the addon does not wait on an item's bind type before acting on one.
+The point of the split is that quality on its own is a poor guide to whether a drop is worth stopping for. At epic, all three kinds want different answers:
 
-The split above that is there because bind type, not quality, is what usually decides whether a drop is worth stopping for. An epic gem or a BoE epic off a trash pull is gold to somebody in the raid; the BoP version off the same boss is not. Set BoE epic to Window and BoP epic to Pass and you only ever see the roll window for the ones you might actually want.
+| Drop | Kind | Typical setting |
+| --- | --- | --- |
+| Tier token, boss gear | BoP | Pass |
+| Pattern, BoE weapon | BoE | Window — somebody has been waiting for it |
+| Epic gem, nether vortex | BoE stack | Pass — it is a commodity |
 
-Bind type comes from the roll itself (`GetLootRollItemInfo`), falling back to the item's own bind type while the client is still fetching an item it has never seen. If neither has answered by the time the retries run out, the roll is left alone rather than guessed at.
+**Where the answers come from.** Bind type is the roll's own `bindOnPickUp` from `GetLootRollItemInfo`, which is the server's answer for that exact roll. Stackability is `itemStackCount` from `GetItemInfo` — the item's maximum stack size, not the number that dropped, so a single epic gem still reads as stackable.
+
+`GetItemInfo` returns nothing until the client has cached the item, and unlike bind type there is no roll-level fallback for stack size. The addon retries for a few seconds against a two-minute roll, and only waits on an answer it will actually use — a BoP drop never waits on its stack size. If something still has not resolved, the roll is left alone rather than guessed at.
 
 Bind-on-pickup prompts are only auto-confirmed for rolls the addon made itself. A prompt raised by your own click still waits for you.
 
@@ -83,7 +99,7 @@ this one and nothing breaks without it.
 | --- | --- |
 | `/apla` | Open the options panel (`/lap` also works) |
 | `/apla pass` | Arm or disarm automated rolling |
-| `/apla set <bop\|boe\|both> <2-5> <window\|pass\|greed\|need>` | Set the action for one quality and bind type (2 ignores the bind, it has one row) |
+| `/apla set <bop\|boe\|stack\|all> <2-5> <window\|pass\|greed\|need>` | Set the action for one quality and kind |
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |

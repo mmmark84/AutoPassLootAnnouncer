@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.4.0] - 2026-09-06
+
+### Added
+- Bind-on-equip drops are split by whether they stack. Stack size is a decent
+  stand-in for "is this a commodity": gems, primals and mats stack, gear and
+  recipes do not. So an epic gem can pass itself while a BoE pattern off the
+  same boss stops and waits for you, which the single BoE row could not
+  express. It comes from `GetItemInfo`'s `itemStackCount`, the item's maximum
+  stack size rather than the number that dropped.
+- `/apla set` takes `stack` for that row, and `all` for every kind at once.
+  `both` still works and now means all three.
+
+- Hovering a row name explains what lands in it, with examples.
+
+### Changed
+- Poor and common are left alone entirely: no auto-roll, the window stays up
+  exactly as it would without the addon running. 1.3.x passed them outright,
+  which was never a call the addon should have been making on its own.
+- Uncommon gets the same three rows as every other quality, rather than the
+  single combined row it had in 1.3.x. That row existed because the qualities
+  were stacked flat and each one cost height; behind a tab it costs nothing,
+  and green mats split from green gear exactly the way epic ones do.
+- The options panel puts each quality behind a tab instead of listing every
+  row at once. Three kinds across four qualities is twelve rows of radio
+  buttons laid out flat, which made the panel taller than some people's
+  screens. The summary underneath still spells out every quality, so nothing
+  is hidden, only folded.
+- Nothing waits on an answer it will not use: a BoP drop never holds up the
+  roll waiting for its stack size, and nothing below rare waits on either.
+- The stackable row is seeded from your existing BoE setting on first login,
+  so the upgrade changes nothing until you split them. Settings stored for
+  qualities below rare are dropped, since they would never be read again.
+
 ## [1.3.1] - 2026-09-06
 
 ### Fixed

@@ -37,20 +37,60 @@ local db   -- declared before anything that reads it, or it resolves to a nil gl
 local QUALITY_NAME = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
 
--- Uncommon is the lowest quality with a setting; poor and common are passed.
--- Rare and up are answered per bind type, uncommon is not, because nobody
--- sorts greens by whether they bind.
+-- Uncommon is the lowest quality the addon will answer for. Poor and common are
+-- left alone entirely: no auto-roll, the window stays up exactly as it would
+-- without the addon running.
+--
+-- Every quality above that gets the same three rows. Uncommon had a single row
+-- back when they were all stacked flat and each one cost height; behind a tab
+-- it costs nothing, and green mats split from green gear the same way epic ones
+-- do, so there is no reason left to special-case it.
 local MIN_ACTION_QUALITY = 2
-local SPLIT_QUALITY      = 3
-local LOW_ACTION         = 0    -- what poor and common get: pass
 
--- Bind on pickup and bind on equip are answered separately, because the thing
--- worth needing and the thing worth leaving alone are often the same quality:
--- a BoE epic gem is gold to somebody, the BoP one off the same boss is not.
-local BINDS = {
-    { key = "actionsBoP", label = "BoP" },
-    { key = "actionsBoE", label = "BoE" },
+-- what a quality is set to on a fresh install. Auto-roll is disarmed at every
+-- login, so this only takes effect once you arm it deliberately.
+local DEFAULT_ACTION = 0    -- pass
+
+-- What a drop binds as, and whether it stacks, decide more about who wants it
+-- than its quality does. A BoE epic gem is a commodity somebody will buy; the
+-- BoE pattern off the same boss is a drop one person has been waiting weeks
+-- for; the BoP version of either is neither. So each is answered separately.
+--
+-- Stack size stands in for "is this a commodity": gems, primals and mats stack,
+-- gear and recipes do not. It is only asked of BoE items, because a BoP one is
+-- already answered by the time it would matter.
+local KINDS = {
+    {
+        key = "actionsBoP", label = "BoP",
+        tip = {
+            "Bind on pickup. It binds to whoever wins it, so it is only ever worth a roll to "
+                .. "someone who is going to use it.",
+            "Tier tokens, boss gear, BoP crafting reagents.",
+        },
+    },
+    {
+        key = "actionsBoE", label = "BoE",
+        tip = {
+            "Bind on equip, and does not stack. The one-off drops, where somebody in the raid "
+                .. "may have been waiting weeks for this exact item.",
+            "Patterns and recipes, BoE weapons and armour.",
+        },
+    },
+    {
+        key = "actionsBoEStack", label = "BoE stack",
+        tip = {
+            "Bind on equip, and stacks. Commodities: worth gold on the auction house rather "
+                .. "than a raid slot, and one more on the pile is much like the last.",
+            "Epic gems, motes and primals, void crystals, nether vortexes.",
+            "Told apart from the row above by the item's maximum stack size.",
+        },
+    },
 }
+
+local function ActionKey(bop, stackable)
+    if bop then return "actionsBoP" end
+    return stackable and "actionsBoEStack" or "actionsBoE"
+end
 
 -- Pepe mode. Twitch Emotes 2.0 swaps these words for pictures on the reading
 -- end, so anyone without that addon sees the bare word instead. Picked by
@@ -102,9 +142,9 @@ local ACTIONS = {
 }
 local ACTION_VERB = { [-1] = "roll window stays up", [0] = "passed", [1] = "NEEDED", [2] = "greeded" }
 
-local function BindSummary(actions)
+local function KindSummary(actions)
     local groups = {}
-    for q = SPLIT_QUALITY, 5 do
+    for q = MIN_ACTION_QUALITY, 5 do
         local a = actions[q] or -1
         groups[a] = groups[a] or {}
         table.insert(groups[a], QualityLabel(q))
@@ -120,12 +160,8 @@ end
 
 local function ActionSummary()
     local lines = {}
-    -- the unsplit qualities keep the same value in both tables, so either reads
-    for q = MIN_ACTION_QUALITY, SPLIT_QUALITY - 1 do
-        lines[#lines + 1] = QualityLabel(q) .. ": " .. ACTION_VERB[db.actionsBoP[q] or -1]
-    end
-    for _, bind in ipairs(BINDS) do
-        lines[#lines + 1] = bind.label .. "  " .. BindSummary(db[bind.key])
+    for _, kind in ipairs(KINDS) do
+        lines[#lines + 1] = kind.label .. "  " .. KindSummary(db[kind.key])
     end
     return table.concat(lines, "\n")
 end
@@ -134,19 +170,13 @@ end
 local autoRolls = {}
 
 -- Returns nil for "leave the roll window up and let the user decide".
-local function RollAction(quality, bop)
-    if not quality then return nil end          -- quality unknown: never touch it
-    if quality < MIN_ACTION_QUALITY then return LOW_ACTION end
+local function RollAction(quality, bop, stackable)
+    if not quality then return nil end                  -- quality unknown
+    if quality < MIN_ACTION_QUALITY then return nil end  -- below the grid: not ours
+    if bop == nil then return nil end                   -- bind type not settled yet
+    if not bop and stackable == nil then return nil end -- BoE, but which kind is unclear
 
-    local a
-    if quality < SPLIT_QUALITY then
-        a = db.actionsBoP[quality]              -- unsplit, both tables agree
-    elseif bop == nil then
-        return nil                              -- bind unknown: hands off as well
-    else
-        a = db[bop and "actionsBoP" or "actionsBoE"][quality]
-    end
-
+    local a = db[ActionKey(bop, stackable)][quality]
     if a == nil or a < 0 then return nil end
     return a
 end
@@ -240,6 +270,17 @@ local function BindOnPickup(rollQuality, rollBoP, link)
     return bindType == 1
 end
 
+-- GetItemInfo return 8 is the item's maximum stack size, not the number that
+-- dropped -- one epic gem drops as a count of 1 but stacks to 20. There is no
+-- roll-level fallback for it the way bindOnPickUp backs up bind type, so it is
+-- nil until the client has the item cached. nil = still unknown.
+local function IsStackable(link)
+    if not link then return nil end
+    local stackCount = select(8, GetItemInfo(link))
+    if stackCount == nil then return nil end
+    return stackCount > 1
+end
+
 function Dbg(fmt, ...)
     if db.debug then print("|cff66ccffAPLA|r |cff888888" .. fmt:format(...) .. "|r") end
 end
@@ -259,18 +300,23 @@ local function ProcessRoll(rollID, tries)
     local rollQuality, rollBoP = select(4, GetLootRollItemInfo(rollID))
     local quality = rollQuality or QualityOf(link)
     local bop = BindOnPickup(rollQuality, rollBoP, link)
+    local stackable = IsStackable(link)
 
-    -- only the split qualities care what the item binds as, so nothing below
-    -- rare is held up waiting for a bind type
-    local needBind = (quality or 0) >= SPLIT_QUALITY
+    -- Nothing below the grid is held up waiting on either of these, and a BoP item
+    -- never has its stack size read, so neither is waited on unless the answer
+    -- is actually going to be used.
+    local needBind  = (quality or 0) >= MIN_ACTION_QUALITY
+    local needStack = needBind and bop == false
 
-    if (not link or not quality or (needBind and bop == nil)) and tries < 12 then
+    if (not link or not quality
+        or (needBind and bop == nil)
+        or (needStack and stackable == nil)) and tries < 12 then
         C_Timer.After(0.25, function() ProcessRoll(rollID, tries + 1) end)
         return
     end
 
-    Dbg("roll %d: link=%s quality=%s bop=%s tries=%d",
-        rollID, tostring(link), tostring(quality), tostring(bop), tries)
+    Dbg("roll %d: link=%s quality=%s bop=%s stack=%s tries=%d", rollID, tostring(link),
+        tostring(quality), tostring(bop), tostring(stackable), tries)
 
     if link and (quality or 99) >= db.minQuality then
         Queue(link)
@@ -281,7 +327,7 @@ local function ProcessRoll(rollID, tries)
         return
     end
 
-    local action = RollAction(quality, bop)
+    local action = RollAction(quality, bop, stackable)
     Dbg("action for roll %d = %s", rollID, tostring(action))
     if action then
         autoRolls[rollID] = action
@@ -489,9 +535,34 @@ local function MakeCheck(parent, name, text, x, y, tip, onClick)
     return cb
 end
 
+-- SetColorTexture is the modern name; the old signature still answers on the
+-- clients that predate it, the same way SetObeyStepOnDrag is guarded above.
+local function Fill(tex, r, g, b, a)
+    if tex.SetColorTexture then
+        tex:SetColorTexture(r, g, b, a)
+    else
+        tex:SetTexture(r, g, b, a)
+    end
+end
+
+-- FontStrings take no mouse input, so anything that wants a tooltip gets an
+-- invisible frame laid over it.
+local function AttachTooltip(frame, title, lines)
+    frame:EnableMouse(true)
+    frame:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(title)
+        for _, line in ipairs(lines) do
+            GameTooltip:AddLine(line, 1, 1, 1, true)   -- true wraps rather than clipping
+        end
+        GameTooltip:Show()
+    end)
+    frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 532)
+    panel:SetSize(340, 490)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -551,89 +622,141 @@ local function BuildPanel()
         "Announce: ", MinLabel, function(v) db.minQuality = v end)
 
     panel.summary = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    panel.summary:SetPoint("TOPLEFT", 24, -392)
+    panel.summary:SetPoint("TOPLEFT", 24, -326)
     panel.summary:SetWidth(292)
     panel.summary:SetJustifyH("LEFT")
 
+    -- One quality at a time, picked with the tabs. Three kinds across three
+    -- qualities laid out flat is nine rows of radio buttons, which made the
+    -- panel taller than some people's screens; the summary underneath still
+    -- spells out every quality at once, so nothing is hidden, only folded.
+    local SelectQuality
+
     local function UpdateGrid()
-        for q, rows in pairs(panel.radios) do
-            for _, row in ipairs(rows) do
-                for i, a in ipairs(ACTIONS) do
-                    row.buttons[i]:SetChecked((db[row.read][q] or -1) == a.value)
-                end
+        for _, row in ipairs(panel.rows) do
+            for i, a in ipairs(ACTIONS) do
+                row.buttons[i]:SetChecked((db[row.key][panel.quality] or -1) == a.value)
             end
         end
         panel.summary:SetText(ActionSummary())
     end
+
+    function SelectQuality(q)
+        panel.quality = q
+        for tq, tb in pairs(panel.tabs) do
+            local c  = ITEM_QUALITY_COLORS[tq]
+            local on = tq == q
+            -- the active tab is filled in its own colour and underlined into
+            -- the rows below it; the rest sit back as flat dark blocks
+            Fill(tb.bg,   c.r, c.g, c.b, on and 0.30 or 0.06)
+            Fill(tb.rule, c.r, c.g, c.b, on and 1.00 or 0.00)
+            tb.text:SetTextColor(c.r, c.g, c.b, on and 1 or 0.5)
+        end
+        UpdateGrid()
+    end
+
     panel.UpdateGrid = UpdateGrid
+    panel.SelectQuality = SelectQuality
 
     local gridHead = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     gridHead:SetPoint("TOPLEFT", 24, -196)
-    local skipped = {}
-    for q = 0, MIN_ACTION_QUALITY - 1 do skipped[#skipped + 1] = QUALITY_NAME[q]:lower() end
-    gridHead:SetText("What to do with each roll   |cff808080("
-        .. table.concat(skipped, " and ") .. ": always passed)|r")
-    gridHead.tooltipText = "Window = do nothing, so the roll window stays on screen for you to answer."
+    gridHead:SetText("What to do with each roll   |cff808080(below "
+        .. QUALITY_NAME[MIN_ACTION_QUALITY]:lower() .. ": left alone)|r")
+
+    local headHover = CreateFrame("Frame", nil, panel)
+    headHover:SetPoint("TOPLEFT", gridHead, "TOPLEFT", 0, 2)
+    headHover:SetSize(gridHead:GetStringWidth(), 16)
+    AttachTooltip(headHover, "Roll actions", {
+        "Window = do nothing, so the roll window stays on screen for you to answer.",
+        "Anything below " .. QUALITY_NAME[MIN_ACTION_QUALITY]:lower()
+            .. " is left alone the same way, whatever it binds as.",
+    })
+
+    -- Drawn here rather than borrowed from one of Blizzard's tab templates.
+    -- Those differ between clients, want the PanelTemplates_ helpers, and are
+    -- drawn to hang off the bottom edge of a frame, which is not where these
+    -- sit. A block filled in the quality's own colour, underlined into the rows
+    -- it controls, says which one you are on without having to be read.
+    local TAB_W, TAB_H = 71, 24
+    panel.tabs = {}
+    for q = MIN_ACTION_QUALITY, 5 do
+        local tb = CreateFrame("Button", nil, panel)
+        tb:SetSize(TAB_W, TAB_H)
+        tb:SetPoint("TOPLEFT", 22 + (q - MIN_ACTION_QUALITY) * (TAB_W + 3), -212)
+
+        tb.bg = tb:CreateTexture(nil, "BACKGROUND")
+        tb.bg:SetAllPoints()
+
+        tb.rule = tb:CreateTexture(nil, "ARTWORK")
+        tb.rule:SetPoint("BOTTOMLEFT")
+        tb.rule:SetPoint("BOTTOMRIGHT")
+        tb.rule:SetHeight(2)
+
+        tb.text = tb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        tb.text:SetPoint("CENTER", 0, 1)
+        tb.text:SetText(QUALITY_NAME[q])
+
+        local hl = tb:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        Fill(hl, 1, 1, 1, 0.10)
+
+        tb:SetScript("OnClick", function() SelectQuality(q) end)
+        panel.tabs[q] = tb
+    end
+
+    -- a rule across the full width, so the active tab reads as sitting on the
+    -- section it opens rather than floating above it
+    local tabRule = panel:CreateTexture(nil, "BACKGROUND")
+    tabRule:SetPoint("TOPLEFT", 22, -236)
+    tabRule:SetPoint("TOPRIGHT", -22, -236)
+    tabRule:SetHeight(1)
+    Fill(tabRule, 1, 1, 1, 0.12)
 
     local COLX = { 150, 195, 240, 285 }
     for i, a in ipairs(ACTIONS) do
         local h = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        h:SetPoint("TOP", panel, "TOPLEFT", COLX[i] + 8, -212)
+        h:SetPoint("TOP", panel, "TOPLEFT", COLX[i] + 8, -244)
         h:SetText(a.label)
     end
 
-    -- A split quality draws a row of radios per bind type with its name between
-    -- them; an unsplit one draws a single row that writes both tables, so the
-    -- lookup in RollAction never has to know which kind it is looking at.
-    panel.radios = {}
-    local rowY = -228
-    for q = MIN_ACTION_QUALITY, 5 do
-        local split = q >= SPLIT_QUALITY
+    -- One row per kind, built once and pointed at whichever quality the tabs
+    -- are showing. Each carries a hover explaining what lands in it.
+    panel.rows = {}
+    for r, kind in ipairs(KINDS) do
+        local y = -260 - (r - 1) * 20
+        local row = { key = kind.key, buttons = {} }
 
-        local rows = {}
-        if split then
-            for _, bind in ipairs(BINDS) do
-                rows[#rows + 1] = { label = bind.label, read = bind.key, keys = { bind.key } }
-            end
-        else
-            rows[1] = { read = BINDS[1].key, keys = { BINDS[1].key, BINDS[2].key } }
+        row.label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.label:SetPoint("TOPLEFT", 40, y - 2)
+        row.label:SetText(kind.label)
+
+        local hover = CreateFrame("Frame", nil, panel)
+        hover:SetPoint("TOPLEFT", 36, y + 1)
+        hover:SetSize(108, 18)
+        AttachTooltip(hover, kind.label, kind.tip)
+
+        for i, a in ipairs(ACTIONS) do
+            local rb = CreateFrame("CheckButton", "APLAAction" .. r .. "_" .. i,
+                panel, "UIRadioButtonTemplate")
+            rb:SetPoint("TOPLEFT", COLX[i], y)
+            rb:SetScript("OnClick", function()
+                db[kind.key][panel.quality] = a.value
+                UpdateGrid()
+            end)
+            row.buttons[i] = rb
         end
 
-        local name = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        name:SetPoint("TOPLEFT", 30, split and rowY - 12 or rowY - 2)
-        name:SetText(QualityLabel(q))
-
-        panel.radios[q] = {}
-        for r, row in ipairs(rows) do
-            local y = rowY - (r - 1) * 20
-            if row.label then
-                local bindName = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                bindName:SetPoint("TOPLEFT", 106, y - 2)
-                bindName:SetText(row.label)
-            end
-
-            panel.radios[q][r] = { read = row.read, buttons = {} }
-            for i, a in ipairs(ACTIONS) do
-                local rb = CreateFrame("CheckButton", "APLAAction" .. q .. "_" .. r .. "_" .. i,
-                    panel, "UIRadioButtonTemplate")
-                rb:SetPoint("TOPLEFT", COLX[i], y)
-                rb:SetScript("OnClick", function()
-                    for _, key in ipairs(row.keys) do db[key][q] = a.value end
-                    UpdateGrid()
-                end)
-                panel.radios[q][r].buttons[i] = rb
-            end
-        end
-
-        rowY = rowY - #rows * 20 - 6
+        panel.rows[r] = row
     end
 
+    SelectQuality(4)   -- epic is the one people actually come here to set
+
     local prefixLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    prefixLabel:SetPoint("TOPLEFT", 24, -446)
+    prefixLabel:SetPoint("TOPLEFT", 24, -398)
     prefixLabel:SetText("Chat prefix")
 
     local edit = CreateFrame("EditBox", "APLAPrefixEdit", panel, "InputBoxTemplate")
-    edit:SetPoint("TOPLEFT", 96, -442)
+    edit:SetPoint("TOPLEFT", 96, -394)
     edit:SetSize(190, 20)
     edit:SetAutoFocus(false)
     -- Commit on focus lost, not only on Enter. Clicking Test does not press
@@ -680,7 +803,7 @@ local function BuildPanel()
         end)
     end
 
-    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -494,
+    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -446,
         "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
@@ -702,7 +825,7 @@ function RefreshPanel()
     panel.pepe:SetChecked(db.pepe)
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
-    panel.UpdateGrid()
+    panel.SelectQuality(panel.quality or 4)
     panel.edit:SetText(db.prefix)
     UpdateButtonLook()
 end
@@ -746,19 +869,30 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             db.actionsBoP, db.actionsBoE = {}, {}
             for q = MIN_ACTION_QUALITY, 5 do
                 local a = from[q + 1]
-                if a == nil then a = LOW_ACTION end
+                if a == nil then a = DEFAULT_ACTION end
                 db.actionsBoP[q], db.actionsBoE[q] = a, a
             end
             db.needMax, db.greedMax, db.passMax = nil, nil, nil
         end
 
-        -- 1.3.0 had no row for uncommon and passed it outright, so a file
-        -- written by that version is short an entry. Fill any gap with what
-        -- the missing row was doing anyway.
-        for _, bind in ipairs(BINDS) do
+        -- The stackable BoE row arrived after the other two, so a file written
+        -- before it has no table for it. Seed it from the plain BoE row, which
+        -- is what stackable BoE drops were being answered with until now.
+        if type(db.actionsBoEStack) ~= "table" then
+            db.actionsBoEStack = {}
             for q = MIN_ACTION_QUALITY, 5 do
-                if db[bind.key][q] == nil then db[bind.key][q] = LOW_ACTION end
+                db.actionsBoEStack[q] = db.actionsBoE[q]
             end
+        end
+
+        -- Fill any gap a file written by an older layout is short of, and drop
+        -- the rows below rare that 1.3.x kept: those qualities are left alone
+        -- now, so a stored setting for them would never be read again.
+        for _, kind in ipairs(KINDS) do
+            for q = MIN_ACTION_QUALITY, 5 do
+                if db[kind.key][q] == nil then db[kind.key][q] = DEFAULT_ACTION end
+            end
+            for q = 0, MIN_ACTION_QUALITY - 1 do db[kind.key][q] = nil end
         end
 
         -- deliberately NOT remembered between sessions, so automated rolling can
@@ -845,22 +979,24 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     elseif cmd == "set" then
         local bind, q, act = val:match("^(%a+)%s+(%d)%s+(%a+)$")
         local map   = { window = -1, leave = -1, pass = 0, need = 1, greed = 2 }
+        local ALL = { "actionsBoP", "actionsBoE", "actionsBoEStack" }
         local binds = {
-            bop  = { keys = { "actionsBoP" },               label = "BoP" },
-            boe  = { keys = { "actionsBoE" },               label = "BoE" },
-            both = { keys = { "actionsBoP", "actionsBoE" }, label = "BoP and BoE" },
+            bop   = { keys = { "actionsBoP" },      label = "BoP" },
+            boe   = { keys = { "actionsBoE" },      label = "BoE" },
+            stack = { keys = { "actionsBoEStack" }, label = "BoE stack" },
+            all   = { keys = ALL,                   label = "every kind" },
+            both  = { keys = ALL,                   label = "every kind" },   -- pre-1.4 name
         }
         local b = binds[bind or ""]
         q = tonumber(q)
         if b and q and q >= MIN_ACTION_QUALITY and q <= 5 and map[act or ""] then
             -- below the split every bind type shares one setting, so whichever
             -- one was typed writes the pair
-            local keys, label = b.keys, b.label .. " "
-            if q < SPLIT_QUALITY then keys, label = { "actionsBoP", "actionsBoE" }, "" end
-            for _, key in ipairs(keys) do db[key][q] = map[act] end
-            print(("|cff66ccffAPLA|r %s%s: %s"):format(label, QualityLabel(q), ACTION_VERB[map[act]]))
+            for _, key in ipairs(b.keys) do db[key][q] = map[act] end
+            print(("|cff66ccffAPLA|r %s %s: %s"):format(b.label, QualityLabel(q), ACTION_VERB[map[act]]))
         else
-            print("|cff66ccffAPLA|r /apla set <bop|boe|both> <2-5> <window|pass|greed|need>")
+            print(("|cff66ccffAPLA|r /apla set <bop|boe|stack|all> <%d-5> <window|pass|greed|need>")
+                :format(MIN_ACTION_QUALITY))
         end
     elseif cmd == "who" then
         SendHello(true)
