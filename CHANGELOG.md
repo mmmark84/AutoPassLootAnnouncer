@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.1] - 2026-09-06
+
+### Fixed
+- A drop is no longer announced twice when several people in the raid run the
+  addon. Copies only counted each other in the single-announcer election for
+  15 minutes after last hearing from one another, but hellos went out at login,
+  on roster changes and nowhere else. A settled raid can go longer than that
+  without anyone joining or leaving, at which point every copy has timed every
+  other one out, each decides it is the announcer, and the drop goes out once
+  per copy. There is now a heartbeat every four minutes while grouped, which is
+  three heartbeats inside the timeout and one addon message per copy per four
+  minutes on the wire.
+- Roster pruning no longer throws away peers it is still grouped with.
+  `GROUP_ROSTER_UPDATE` can arrive before the client has filled in the unit
+  table, and pruning against a roster that is not there yet dropped live peers.
+  It now leaves them alone when the roster reads as empty, and asks for a
+  recount when it does drop someone, rather than announcing over them until the
+  next hello.
+- `/apla who` reports how long ago each peer was last heard from and flags the
+  ones that have timed out, which is what this would have looked like.
+
 ## [1.5.0] - 2026-09-06
 
 ### Added

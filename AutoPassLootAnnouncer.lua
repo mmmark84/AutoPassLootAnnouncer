@@ -375,7 +375,18 @@ local COMM_PREFIX = "APLAnnounce"
 local peers = {}          -- [name] = { seen = GetTime(), willing = bool, coop = bool }
                           -- coop is only ever false for a peer on an older version,
                           -- back when announcing alone could be switched off
-local lastHello = 0
+-- A peer is only counted in the election for as long as we keep hearing from
+-- it. Hellos used to go out at login, on roster changes and nowhere else, which
+-- in a settled raid can mean no traffic at all for longer than the timeout:
+-- every copy then times every other one out, each decides it is the announcer,
+-- and the drop goes out twice. The heartbeat sits well inside the timeout so
+-- that cannot happen, and is quiet enough to be free -- one addon message every
+-- four minutes, only while grouped.
+local PEER_TIMEOUT   = 900
+local HELLO_INTERVAL = 240
+local REQUEST_THROTTLE = 30
+
+local lastHello, lastRequest = 0, 0
 
 local function Me() return UnitName("player") end
 
@@ -404,13 +415,23 @@ function SendHello(force)
     Comm(("H:%s:1"):format(db.announce and 1 or 0))
 end
 
+-- Sent when we think our picture of the group has gone stale. Copies on older
+-- versions do not recognise it and carry on; they are still heard on their own
+-- hellos. Throttled because every copy that prunes could otherwise ask at once.
+local function RequestHellos()
+    local now = GetTime()
+    if (now - lastRequest) < REQUEST_THROTTLE then return end
+    lastRequest = now
+    Comm("H?")
+end
+
 -- Everyone runs the same election over the same roster, so no negotiation is
 -- needed per drop: lowest name alphabetically among the willing copies wins.
 function Announcer()
     local best = db.announce and Me() or nil
     local now = GetTime()
     for name, info in pairs(peers) do
-        if info.willing and (now - info.seen) < 900 then
+        if info.willing and (now - info.seen) < PEER_TIMEOUT then
             if not best or name < best then best = name end
         end
     end
@@ -424,15 +445,29 @@ end
 
 local function PruneToGroup()
     if not IsInGroup() then wipe(peers); return end
-    local present = {}
+
+    local present, found = {}, 0
     local prefix = IsInRaid() and "raid" or "party"
     for i = 1, GetNumGroupMembers() do
         local n = UnitName(prefix .. i)
-        if n then present[n] = true end
+        if n then present[n] = true; found = found + 1 end
     end
+
+    -- GROUP_ROSTER_UPDATE can arrive before the unit table has caught up, and
+    -- pruning against a roster that is not there yet throws away peers we are
+    -- still grouped with. Leave them be; the timeout sees off anyone who has
+    -- really gone.
+    if found == 0 then return end
+
+    local dropped = false
     for name in pairs(peers) do
-        if not present[name] then peers[name] = nil end
+        if not present[name] then peers[name] = nil; dropped = true end
     end
+
+    -- If that was wrong -- a name the client had not filled in yet, say -- we
+    -- have just made ourselves think we are alone. Ask for a recount rather
+    -- than announcing over someone for the next few minutes.
+    if dropped then RequestHellos() end
 end
 
 ----------------------------------------------------------------
@@ -1431,6 +1466,13 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if prefix ~= COMM_PREFIX then return end
         sender = Ambiguate(sender, "none")
         if sender == Me() then return end
+
+        if message == "H?" then
+            -- someone has lost track of the group and wants a recount
+            C_Timer.After(0.5 + math.random() * 2, function() SendHello(true) end)
+            return
+        end
+
         local willing, coop = message:match("^H:(%d):(%d)$")
         if willing then
             local known = peers[sender] ~= nil
@@ -1446,6 +1488,9 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- no math.randomseed here: the client already seeds math.random, and
         -- Blizzard removed randomseed from the addon environment
         SendHello(true)
+        C_Timer.NewTicker(HELLO_INTERVAL, function()
+            if GroupChannel() then SendHello(true) end
+        end)
 
         if db.loginArm == "on" then
             db.autopass = true
@@ -1523,9 +1568,18 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         end
     elseif cmd == "who" then
         SendHello(true)
-        print("|cff66ccffAPLA|r announcer: " .. tostring(Announcer()))
+        RequestHellos()
+        local who, now = Announcer(), GetTime()
+        print(("|cff66ccffAPLA|r announcer: %s%s"):format(
+            tostring(who), who == Me() and " |cff00ff00(you)|r" or ""))
+        if not next(peers) then
+            print("  no other copies heard from")
+        end
         for name, info in pairs(peers) do
-            print(("  %s  willing=%s coop=%s"):format(name, tostring(info.willing), tostring(info.coop)))
+            local age = now - info.seen
+            print(("  %s  willing=%s  heard %ds ago%s"):format(
+                name, tostring(info.willing), math.floor(age),
+                age >= PEER_TIMEOUT and "  |cffff0000timed out|r" or ""))
         end
     elseif cmd == "login" then
         if LOGIN_ARM_LABEL[val] then
