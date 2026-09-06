@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.1] - 2026-09-06
+
+### Fixed
+- Uncommon has a row again. 1.3.0 dropped it along with poor and common and
+  passed all three outright, which is not a call that setting was there to
+  make. It is a single row rather than a BoP/BoE pair, because nobody sorts
+  greens by whether they bind, and the addon no longer waits on an item's bind
+  type before acting on one. Poor and common stay passed.
+- `/apla set` takes quality 2 again. The bind argument is still required but is
+  ignored for 2, which writes the one row.
+
 ## [1.3.0] - 2026-09-06
 
 ### Added

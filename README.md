@@ -32,7 +32,7 @@ For the addon to see rolls at all, Blizzard's own **Pass on Loot** option must b
 
 ### Roll actions
 
-Rare, epic and legendary each get two settings, one for bind-on-pickup and one for bind-on-equip:
+Uncommon gets one setting. Rare, epic and legendary get two each, one for bind-on-pickup and one for bind-on-equip:
 
 | Action | Result |
 | --- | --- |
@@ -41,9 +41,11 @@ Rare, epic and legendary each get two settings, one for bind-on-pickup and one f
 | Greed | Greeds, and auto-confirms the bind-on-pickup prompt |
 | Need | Needs, auto-confirms, and prints a local notice |
 
-Anything below rare is passed and has no setting of its own.
+Poor and common are passed and have no setting of their own.
 
-The split is there because bind type, not quality, is what usually decides whether a drop is worth stopping for. An epic gem or a BoE epic off a trash pull is gold to somebody in the raid; the BoP version off the same boss is not. Set BoE epic to Window and BoP epic to Pass and you only ever see the roll window for the ones you might actually want.
+Greens are not split by bind type — nobody sorts greens that way — so the one row covers both and the addon does not wait on an item's bind type before acting on one.
+
+The split above that is there because bind type, not quality, is what usually decides whether a drop is worth stopping for. An epic gem or a BoE epic off a trash pull is gold to somebody in the raid; the BoP version off the same boss is not. Set BoE epic to Window and BoP epic to Pass and you only ever see the roll window for the ones you might actually want.
 
 Bind type comes from the roll itself (`GetLootRollItemInfo`), falling back to the item's own bind type while the client is still fetching an item it has never seen. If neither has answered by the time the retries run out, the roll is left alone rather than guessed at.
 
@@ -81,7 +83,7 @@ this one and nothing breaks without it.
 | --- | --- |
 | `/apla` | Open the options panel (`/lap` also works) |
 | `/apla pass` | Arm or disarm automated rolling |
-| `/apla set <bop\|boe\|both> <3-5> <window\|pass\|greed\|need>` | Set the action for one quality and bind type |
+| `/apla set <bop\|boe\|both> <2-5> <window\|pass\|greed\|need>` | Set the action for one quality and bind type (2 ignores the bind, it has one row) |
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |

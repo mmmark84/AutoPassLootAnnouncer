@@ -37,10 +37,12 @@ local db   -- declared before anything that reads it, or it resolves to a nil gl
 local QUALITY_NAME = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
 
--- Only rare and up get a setting. Poor through uncommon had a row each and it
--- was three rows of nobody caring, so they are passed and that is that.
-local MIN_ACTION_QUALITY = 3
-local LOW_ACTION         = 0    -- what happens below that: pass
+-- Uncommon is the lowest quality with a setting; poor and common are passed.
+-- Rare and up are answered per bind type, uncommon is not, because nobody
+-- sorts greens by whether they bind.
+local MIN_ACTION_QUALITY = 2
+local SPLIT_QUALITY      = 3
+local LOW_ACTION         = 0    -- what poor and common get: pass
 
 -- Bind on pickup and bind on equip are answered separately, because the thing
 -- worth needing and the thing worth leaving alone are often the same quality:
@@ -102,7 +104,7 @@ local ACTION_VERB = { [-1] = "roll window stays up", [0] = "passed", [1] = "NEED
 
 local function BindSummary(actions)
     local groups = {}
-    for q = MIN_ACTION_QUALITY, 5 do
+    for q = SPLIT_QUALITY, 5 do
         local a = actions[q] or -1
         groups[a] = groups[a] or {}
         table.insert(groups[a], QualityLabel(q))
@@ -118,6 +120,10 @@ end
 
 local function ActionSummary()
     local lines = {}
+    -- the unsplit qualities keep the same value in both tables, so either reads
+    for q = MIN_ACTION_QUALITY, SPLIT_QUALITY - 1 do
+        lines[#lines + 1] = QualityLabel(q) .. ": " .. ACTION_VERB[db.actionsBoP[q] or -1]
+    end
     for _, bind in ipairs(BINDS) do
         lines[#lines + 1] = bind.label .. "  " .. BindSummary(db[bind.key])
     end
@@ -131,8 +137,16 @@ local autoRolls = {}
 local function RollAction(quality, bop)
     if not quality then return nil end          -- quality unknown: never touch it
     if quality < MIN_ACTION_QUALITY then return LOW_ACTION end
-    if bop == nil then return nil end           -- bind unknown: same, hands off
-    local a = db[bop and "actionsBoP" or "actionsBoE"][quality]
+
+    local a
+    if quality < SPLIT_QUALITY then
+        a = db.actionsBoP[quality]              -- unsplit, both tables agree
+    elseif bop == nil then
+        return nil                              -- bind unknown: hands off as well
+    else
+        a = db[bop and "actionsBoP" or "actionsBoE"][quality]
+    end
+
     if a == nil or a < 0 then return nil end
     return a
 end
@@ -246,9 +260,9 @@ local function ProcessRoll(rollID, tries)
     local quality = rollQuality or QualityOf(link)
     local bop = BindOnPickup(rollQuality, rollBoP, link)
 
-    -- everything below the grid is passed whatever it binds as, so there is no
-    -- point holding a green up waiting for its bind type
-    local needBind = (quality or 0) >= MIN_ACTION_QUALITY
+    -- only the split qualities care what the item binds as, so nothing below
+    -- rare is held up waiting for a bind type
+    local needBind = (quality or 0) >= SPLIT_QUALITY
 
     if (not link or not quality or (needBind and bop == nil)) and tries < 12 then
         C_Timer.After(0.25, function() ProcessRoll(rollID, tries + 1) end)
@@ -477,7 +491,7 @@ end
 
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 504)
+    panel:SetSize(340, 532)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -537,15 +551,15 @@ local function BuildPanel()
         "Announce: ", MinLabel, function(v) db.minQuality = v end)
 
     panel.summary = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    panel.summary:SetPoint("TOPLEFT", 24, -364)
+    panel.summary:SetPoint("TOPLEFT", 24, -392)
     panel.summary:SetWidth(292)
     panel.summary:SetJustifyH("LEFT")
 
     local function UpdateGrid()
-        for q = MIN_ACTION_QUALITY, 5 do
-            for b, bind in ipairs(BINDS) do
+        for q, rows in pairs(panel.radios) do
+            for _, row in ipairs(rows) do
                 for i, a in ipairs(ACTIONS) do
-                    panel.radios[q][b][i]:SetChecked((db[bind.key][q] or -1) == a.value)
+                    row.buttons[i]:SetChecked((db[row.read][q] or -1) == a.value)
                 end
             end
         end
@@ -555,8 +569,10 @@ local function BuildPanel()
 
     local gridHead = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     gridHead:SetPoint("TOPLEFT", 24, -196)
-    gridHead:SetText("What to do with each roll   |cff808080(below "
-        .. QUALITY_NAME[MIN_ACTION_QUALITY]:lower() .. ": always passed)|r")
+    local skipped = {}
+    for q = 0, MIN_ACTION_QUALITY - 1 do skipped[#skipped + 1] = QUALITY_NAME[q]:lower() end
+    gridHead:SetText("What to do with each roll   |cff808080("
+        .. table.concat(skipped, " and ") .. ": always passed)|r")
     gridHead.tooltipText = "Window = do nothing, so the roll window stays on screen for you to answer."
 
     local COLX = { 150, 195, 240, 285 }
@@ -566,42 +582,58 @@ local function BuildPanel()
         h:SetText(a.label)
     end
 
-    -- Two rows per quality, one per bind type, with the quality name sitting
-    -- between them. Six radio rows either way, so nothing below the grid moves.
+    -- A split quality draws a row of radios per bind type with its name between
+    -- them; an unsplit one draws a single row that writes both tables, so the
+    -- lookup in RollAction never has to know which kind it is looking at.
     panel.radios = {}
+    local rowY = -228
     for q = MIN_ACTION_QUALITY, 5 do
-        local top = -228 - (q - MIN_ACTION_QUALITY) * 46
+        local split = q >= SPLIT_QUALITY
+
+        local rows = {}
+        if split then
+            for _, bind in ipairs(BINDS) do
+                rows[#rows + 1] = { label = bind.label, read = bind.key, keys = { bind.key } }
+            end
+        else
+            rows[1] = { read = BINDS[1].key, keys = { BINDS[1].key, BINDS[2].key } }
+        end
+
         local name = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        name:SetPoint("TOPLEFT", 30, top - 12)
+        name:SetPoint("TOPLEFT", 30, split and rowY - 12 or rowY - 2)
         name:SetText(QualityLabel(q))
 
         panel.radios[q] = {}
-        for b, bind in ipairs(BINDS) do
-            local y = top - (b - 1) * 20
-            local bindName = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            bindName:SetPoint("TOPLEFT", 106, y - 2)
-            bindName:SetText(bind.label)
+        for r, row in ipairs(rows) do
+            local y = rowY - (r - 1) * 20
+            if row.label then
+                local bindName = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                bindName:SetPoint("TOPLEFT", 106, y - 2)
+                bindName:SetText(row.label)
+            end
 
-            panel.radios[q][b] = {}
+            panel.radios[q][r] = { read = row.read, buttons = {} }
             for i, a in ipairs(ACTIONS) do
-                local rb = CreateFrame("CheckButton", "APLAAction" .. q .. "_" .. b .. "_" .. i,
+                local rb = CreateFrame("CheckButton", "APLAAction" .. q .. "_" .. r .. "_" .. i,
                     panel, "UIRadioButtonTemplate")
                 rb:SetPoint("TOPLEFT", COLX[i], y)
                 rb:SetScript("OnClick", function()
-                    db[bind.key][q] = a.value
+                    for _, key in ipairs(row.keys) do db[key][q] = a.value end
                     UpdateGrid()
                 end)
-                panel.radios[q][b][i] = rb
+                panel.radios[q][r].buttons[i] = rb
             end
         end
+
+        rowY = rowY - #rows * 20 - 6
     end
 
     local prefixLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    prefixLabel:SetPoint("TOPLEFT", 24, -418)
+    prefixLabel:SetPoint("TOPLEFT", 24, -446)
     prefixLabel:SetText("Chat prefix")
 
     local edit = CreateFrame("EditBox", "APLAPrefixEdit", panel, "InputBoxTemplate")
-    edit:SetPoint("TOPLEFT", 96, -414)
+    edit:SetPoint("TOPLEFT", 96, -442)
     edit:SetSize(190, 20)
     edit:SetAutoFocus(false)
     -- Commit on focus lost, not only on Enter. Clicking Test does not press
@@ -648,7 +680,7 @@ local function BuildPanel()
         end)
     end
 
-    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -466,
+    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -494,
         "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
@@ -718,6 +750,15 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 db.actionsBoP[q], db.actionsBoE[q] = a, a
             end
             db.needMax, db.greedMax, db.passMax = nil, nil, nil
+        end
+
+        -- 1.3.0 had no row for uncommon and passed it outright, so a file
+        -- written by that version is short an entry. Fill any gap with what
+        -- the missing row was doing anyway.
+        for _, bind in ipairs(BINDS) do
+            for q = MIN_ACTION_QUALITY, 5 do
+                if db[bind.key][q] == nil then db[bind.key][q] = LOW_ACTION end
+            end
         end
 
         -- deliberately NOT remembered between sessions, so automated rolling can
@@ -812,10 +853,14 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         local b = binds[bind or ""]
         q = tonumber(q)
         if b and q and q >= MIN_ACTION_QUALITY and q <= 5 and map[act or ""] then
-            for _, key in ipairs(b.keys) do db[key][q] = map[act] end
-            print(("|cff66ccffAPLA|r %s %s: %s"):format(b.label, QualityLabel(q), ACTION_VERB[map[act]]))
+            -- below the split every bind type shares one setting, so whichever
+            -- one was typed writes the pair
+            local keys, label = b.keys, b.label .. " "
+            if q < SPLIT_QUALITY then keys, label = { "actionsBoP", "actionsBoE" }, "" end
+            for _, key in ipairs(keys) do db[key][q] = map[act] end
+            print(("|cff66ccffAPLA|r %s%s: %s"):format(label, QualityLabel(q), ACTION_VERB[map[act]]))
         else
-            print("|cff66ccffAPLA|r /apla set <bop|boe|both> <3-5> <window|pass|greed|need>")
+            print("|cff66ccffAPLA|r /apla set <bop|boe|both> <2-5> <window|pass|greed|need>")
         end
     elseif cmd == "who" then
         SendHello(true)
