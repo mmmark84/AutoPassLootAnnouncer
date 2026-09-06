@@ -10,7 +10,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 - **Announces on the roll**, not on the corpse, so you see drops even when someone else loots the body
 - **One line per item**, to your choice of channel
-- **Per-quality roll actions** — need, greed, pass, or leave the window up, set independently for each item quality
+- **Per-quality, per-bind roll actions** — need, greed, pass, or leave the window up, set separately for bind-on-pickup and bind-on-equip drops, so a BoE epic can be needed while the BoP one off the same boss waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
 - **Disarmed at every login**, so automated rolling can never be left on by accident
 - **Pepe mode**, which puts a random cheerful pepe in front of every announcement
@@ -32,7 +32,7 @@ For the addon to see rolls at all, Blizzard's own **Pass on Loot** option must b
 
 ### Roll actions
 
-Each quality gets one action:
+Rare, epic and legendary each get two settings, one for bind-on-pickup and one for bind-on-equip:
 
 | Action | Result |
 | --- | --- |
@@ -40,6 +40,12 @@ Each quality gets one action:
 | Pass | Passes immediately |
 | Greed | Greeds, and auto-confirms the bind-on-pickup prompt |
 | Need | Needs, auto-confirms, and prints a local notice |
+
+Anything below rare is passed and has no setting of its own.
+
+The split is there because bind type, not quality, is what usually decides whether a drop is worth stopping for. An epic gem or a BoE epic off a trash pull is gold to somebody in the raid; the BoP version off the same boss is not. Set BoE epic to Window and BoP epic to Pass and you only ever see the roll window for the ones you might actually want.
+
+Bind type comes from the roll itself (`GetLootRollItemInfo`), falling back to the item's own bind type while the client is still fetching an item it has never seen. If neither has answered by the time the retries run out, the roll is left alone rather than guessed at.
 
 Bind-on-pickup prompts are only auto-confirmed for rolls the addon made itself. A prompt raised by your own click still waits for you.
 
@@ -75,7 +81,7 @@ this one and nothing breaks without it.
 | --- | --- |
 | `/apla` | Open the options panel (`/lap` also works) |
 | `/apla pass` | Arm or disarm automated rolling |
-| `/apla set <0-5> <window\|pass\|greed\|need>` | Set the action for one quality |
+| `/apla set <bop\|boe\|both> <3-5> <window\|pass\|greed\|need>` | Set the action for one quality and bind type |
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |

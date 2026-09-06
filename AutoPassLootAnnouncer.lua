@@ -22,8 +22,9 @@ local defaults = {
     announce     = true,   -- false = print to your own chat frame only
     channel      = 3,      -- widest channel to use: 1 say, 2 party, 3 raid, 4 yell
     minQuality   = 3,      -- announce threshold: 2=green 3=blue 4=epic
-    -- actions[quality + 1] = -1 leave / 0 pass / 1 need / 2 greed. Built in
-    -- ADDON_LOADED because a table in `defaults` would be shared by reference.
+    -- actionsBoP[quality] and actionsBoE[quality] = -1 leave / 0 pass / 1 need /
+    -- 2 greed, rare and up only. Built in ADDON_LOADED because a table in
+    -- `defaults` would be shared by reference.
     prefix       = "Drop:",
     pepe         = false,  -- prepend a random happy pepe to every announce
     debug        = false,  -- /apla debug: log every roll decision
@@ -35,6 +36,19 @@ local db   -- declared before anything that reads it, or it resolves to a nil gl
 
 local QUALITY_NAME = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
+
+-- Only rare and up get a setting. Poor through uncommon had a row each and it
+-- was three rows of nobody caring, so they are passed and that is that.
+local MIN_ACTION_QUALITY = 3
+local LOW_ACTION         = 0    -- what happens below that: pass
+
+-- Bind on pickup and bind on equip are answered separately, because the thing
+-- worth needing and the thing worth leaving alone are often the same quality:
+-- a BoE epic gem is gold to somebody, the BoP one off the same boss is not.
+local BINDS = {
+    { key = "actionsBoP", label = "BoP" },
+    { key = "actionsBoE", label = "BoE" },
+}
 
 -- Pepe mode. Twitch Emotes 2.0 swaps these words for pictures on the reading
 -- end, so anyone without that addon sees the bare word instead. Picked by
@@ -76,7 +90,8 @@ local function MinLabel(v)
     return QualityLabel(v) .. " and better"
 end
 
--- one action per quality, no precedence rules and no inclusive/exclusive edges
+-- one action per quality and bind type, no precedence rules and no
+-- inclusive/exclusive edges
 local ACTIONS = {
     { value = -1, label = "Window" },
     { value =  0, label = "Pass"  },
@@ -85,10 +100,10 @@ local ACTIONS = {
 }
 local ACTION_VERB = { [-1] = "roll window stays up", [0] = "passed", [1] = "NEEDED", [2] = "greeded" }
 
-local function ActionSummary()
+local function BindSummary(actions)
     local groups = {}
-    for q = 0, 5 do
-        local a = db.actions[q + 1] or -1
+    for q = MIN_ACTION_QUALITY, 5 do
+        local a = actions[q] or -1
         groups[a] = groups[a] or {}
         table.insert(groups[a], QualityLabel(q))
     end
@@ -101,13 +116,23 @@ local function ActionSummary()
     return table.concat(parts, "  |  ")
 end
 
+local function ActionSummary()
+    local lines = {}
+    for _, bind in ipairs(BINDS) do
+        lines[#lines + 1] = bind.label .. "  " .. BindSummary(db[bind.key])
+    end
+    return table.concat(lines, "\n")
+end
+
 -- rolls this addon made itself, so we only auto-confirm BoP prompts we caused
 local autoRolls = {}
 
 -- Returns nil for "leave the roll window up and let the user decide".
-local function RollAction(quality)
+local function RollAction(quality, bop)
     if not quality then return nil end          -- quality unknown: never touch it
-    local a = db.actions[quality + 1]
+    if quality < MIN_ACTION_QUALITY then return LOW_ACTION end
+    if bop == nil then return nil end           -- bind unknown: same, hands off
+    local a = db[bop and "actionsBoP" or "actionsBoE"][quality]
     if a == nil or a < 0 then return nil end
     return a
 end
@@ -187,6 +212,20 @@ local function QualityOf(link)
     return hex and map[hex:lower()]
 end
 
+-- GetLootRollItemInfo's bindOnPickUp is the server's own answer for this exact
+-- roll, so it wins whenever that call returned anything at all; a nil there
+-- next to a real quality means "not BoP", not "unknown". Before the item is
+-- cached the call returns nothing and GetItemInfo's bindType (1 = BoP, 2 = BoE)
+-- has to answer instead, which is nil for the same reason. nil = still unknown,
+-- and the caller leaves the roll alone.
+local function BindOnPickup(rollQuality, rollBoP, link)
+    if rollQuality ~= nil then return rollBoP and true or false end
+    if not link then return nil end
+    local bindType = select(14, GetItemInfo(link))
+    if bindType == nil then return nil end
+    return bindType == 1
+end
+
 function Dbg(fmt, ...)
     if db.debug then print("|cff66ccffAPLA|r |cff888888" .. fmt:format(...) .. "|r") end
 end
@@ -203,14 +242,21 @@ local function ProcessRoll(rollID, tries)
     end
 
     local link = GetLootRollItemLink(rollID)
-    local quality = select(4, GetLootRollItemInfo(rollID)) or QualityOf(link)
+    local rollQuality, rollBoP = select(4, GetLootRollItemInfo(rollID))
+    local quality = rollQuality or QualityOf(link)
+    local bop = BindOnPickup(rollQuality, rollBoP, link)
 
-    if (not link or not quality) and tries < 12 then
+    -- everything below the grid is passed whatever it binds as, so there is no
+    -- point holding a green up waiting for its bind type
+    local needBind = (quality or 0) >= MIN_ACTION_QUALITY
+
+    if (not link or not quality or (needBind and bop == nil)) and tries < 12 then
         C_Timer.After(0.25, function() ProcessRoll(rollID, tries + 1) end)
         return
     end
 
-    Dbg("roll %d: link=%s quality=%s tries=%d", rollID, tostring(link), tostring(quality), tries)
+    Dbg("roll %d: link=%s quality=%s bop=%s tries=%d",
+        rollID, tostring(link), tostring(quality), tostring(bop), tries)
 
     if link and (quality or 99) >= db.minQuality then
         Queue(link)
@@ -221,7 +267,7 @@ local function ProcessRoll(rollID, tries)
         return
     end
 
-    local action = RollAction(quality)
+    local action = RollAction(quality, bop)
     Dbg("action for roll %d = %s", rollID, tostring(action))
     if action then
         autoRolls[rollID] = action
@@ -431,7 +477,7 @@ end
 
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 488)
+    panel:SetSize(340, 504)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -496,9 +542,11 @@ local function BuildPanel()
     panel.summary:SetJustifyH("LEFT")
 
     local function UpdateGrid()
-        for q = 0, 5 do
-            for i, a in ipairs(ACTIONS) do
-                panel.radios[q][i]:SetChecked((db.actions[q + 1] or -1) == a.value)
+        for q = MIN_ACTION_QUALITY, 5 do
+            for b, bind in ipairs(BINDS) do
+                for i, a in ipairs(ACTIONS) do
+                    panel.radios[q][b][i]:SetChecked((db[bind.key][q] or -1) == a.value)
+                end
             end
         end
         panel.summary:SetText(ActionSummary())
@@ -507,7 +555,8 @@ local function BuildPanel()
 
     local gridHead = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     gridHead:SetPoint("TOPLEFT", 24, -196)
-    gridHead:SetText("What to do with each quality")
+    gridHead:SetText("What to do with each roll   |cff808080(below "
+        .. QUALITY_NAME[MIN_ACTION_QUALITY]:lower() .. ": always passed)|r")
     gridHead.tooltipText = "Window = do nothing, so the roll window stays on screen for you to answer."
 
     local COLX = { 150, 195, 240, 285 }
@@ -517,31 +566,42 @@ local function BuildPanel()
         h:SetText(a.label)
     end
 
+    -- Two rows per quality, one per bind type, with the quality name sitting
+    -- between them. Six radio rows either way, so nothing below the grid moves.
     panel.radios = {}
-    for q = 0, 5 do
-        local y = -228 - q * 22
+    for q = MIN_ACTION_QUALITY, 5 do
+        local top = -228 - (q - MIN_ACTION_QUALITY) * 46
         local name = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        name:SetPoint("TOPLEFT", 30, y - 2)
+        name:SetPoint("TOPLEFT", 30, top - 12)
         name:SetText(QualityLabel(q))
 
         panel.radios[q] = {}
-        for i, a in ipairs(ACTIONS) do
-            local rb = CreateFrame("CheckButton", "APLAAction" .. q .. "_" .. i, panel, "UIRadioButtonTemplate")
-            rb:SetPoint("TOPLEFT", COLX[i], y)
-            rb:SetScript("OnClick", function()
-                db.actions[q + 1] = a.value
-                UpdateGrid()
-            end)
-            panel.radios[q][i] = rb
+        for b, bind in ipairs(BINDS) do
+            local y = top - (b - 1) * 20
+            local bindName = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            bindName:SetPoint("TOPLEFT", 106, y - 2)
+            bindName:SetText(bind.label)
+
+            panel.radios[q][b] = {}
+            for i, a in ipairs(ACTIONS) do
+                local rb = CreateFrame("CheckButton", "APLAAction" .. q .. "_" .. b .. "_" .. i,
+                    panel, "UIRadioButtonTemplate")
+                rb:SetPoint("TOPLEFT", COLX[i], y)
+                rb:SetScript("OnClick", function()
+                    db[bind.key][q] = a.value
+                    UpdateGrid()
+                end)
+                panel.radios[q][b][i] = rb
+            end
         end
     end
 
     local prefixLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    prefixLabel:SetPoint("TOPLEFT", 24, -402)
+    prefixLabel:SetPoint("TOPLEFT", 24, -418)
     prefixLabel:SetText("Chat prefix")
 
     local edit = CreateFrame("EditBox", "APLAPrefixEdit", panel, "InputBoxTemplate")
-    edit:SetPoint("TOPLEFT", 96, -398)
+    edit:SetPoint("TOPLEFT", 96, -414)
     edit:SetSize(190, 20)
     edit:SetAutoFocus(false)
     -- Commit on focus lost, not only on Enter. Clicking Test does not press
@@ -588,7 +648,7 @@ local function BuildPanel()
         end)
     end
 
-    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -450,
+    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -466,
         "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
@@ -635,16 +695,27 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             if db[k] == nil then db[k] = v end
         end
 
-        if type(db.actions) ~= "table" then
-            -- fresh install, or migrate the old need/greed/pass band settings
-            local need, greed, pass = db.needMax or -1, db.greedMax or -1, db.passMax or 5
-            db.actions = {}
-            for q = 0, 5 do
-                local a = -1
-                if     q <= need  then a = 1
-                elseif q <= greed then a = 2
-                elseif q <= pass  then a = 0 end
-                db.actions[q + 1] = a
+        if type(db.actionsBoP) ~= "table" or type(db.actionsBoE) ~= "table" then
+            -- Whatever the last version stored goes to both bind types, so the
+            -- upgrade changes nothing until you split the two yourself.
+            local from = type(db.actions) == "table" and db.actions or nil
+            if not from then
+                -- older still: the need/greed/pass band settings
+                local need, greed, pass = db.needMax or -1, db.greedMax or -1, db.passMax or 5
+                from = {}
+                for q = 0, 5 do
+                    local a = -1
+                    if     q <= need  then a = 1
+                    elseif q <= greed then a = 2
+                    elseif q <= pass  then a = 0 end
+                    from[q + 1] = a
+                end
+            end
+            db.actionsBoP, db.actionsBoE = {}, {}
+            for q = MIN_ACTION_QUALITY, 5 do
+                local a = from[q + 1]
+                if a == nil then a = LOW_ACTION end
+                db.actionsBoP[q], db.actionsBoE[q] = a, a
             end
             db.needMax, db.greedMax, db.passMax = nil, nil, nil
         end
@@ -654,7 +725,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         db.autopass = false
 
         -- dropped settings, cleared out of a saved file written by an older version
-        db.fromCorpse, db.coop = nil, nil
+        db.fromCorpse, db.coop, db.actions = nil, nil, nil
 
         BuildButton()
         BuildPanel()
@@ -731,14 +802,20 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     elseif cmd == "quality" and tonumber(val) then
         db.minQuality = tonumber(val)
     elseif cmd == "set" then
-        local q, act = val:match("^(%d)%s+(%a+)$")
-        local map = { window = -1, leave = -1, pass = 0, need = 1, greed = 2 }
+        local bind, q, act = val:match("^(%a+)%s+(%d)%s+(%a+)$")
+        local map   = { window = -1, leave = -1, pass = 0, need = 1, greed = 2 }
+        local binds = {
+            bop  = { keys = { "actionsBoP" },               label = "BoP" },
+            boe  = { keys = { "actionsBoE" },               label = "BoE" },
+            both = { keys = { "actionsBoP", "actionsBoE" }, label = "BoP and BoE" },
+        }
+        local b = binds[bind or ""]
         q = tonumber(q)
-        if q and q >= 0 and q <= 5 and map[act or ""] then
-            db.actions[q + 1] = map[act]
-            print("|cff66ccffAPLA|r " .. QualityLabel(q) .. ": " .. ACTION_VERB[map[act]])
+        if b and q and q >= MIN_ACTION_QUALITY and q <= 5 and map[act or ""] then
+            for _, key in ipairs(b.keys) do db[key][q] = map[act] end
+            print(("|cff66ccffAPLA|r %s %s: %s"):format(b.label, QualityLabel(q), ACTION_VERB[map[act]]))
         else
-            print("|cff66ccffAPLA|r /apla set <0-5> <window|pass|greed|need>")
+            print("|cff66ccffAPLA|r /apla set <bop|boe|both> <3-5> <window|pass|greed|need>")
         end
     elseif cmd == "who" then
         SendHello(true)

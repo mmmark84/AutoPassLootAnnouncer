@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.0] - 2026-09-06
+
+### Added
+- Roll actions are set per bind type as well as per quality. Rare, epic and
+  legendary each have a BoP row and a BoE row, so the BoE epic that is worth
+  gold to someone can be left on screen while the BoP one off the same boss is
+  passed without a word. Bind type comes from the roll's own `bindOnPickUp`,
+  falling back to the item's `bindType` while an unseen item is still being
+  fetched; a roll whose bind type never resolves is left alone rather than
+  guessed at.
+- `/apla set` takes a bind type: `/apla set boe 4 need`. `both` sets the pair.
+
+### Changed
+- Poor, common and uncommon no longer have a row each. They are passed, which
+  is what they were set to by everyone who ever looked at that grid.
+- Existing settings are carried across to both bind types on first login, so
+  the upgrade changes nothing until you split them yourself.
+
 ## [1.2.1] - 2026-09-04
 
 ### Fixed
