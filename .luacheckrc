@@ -24,6 +24,7 @@ globals = {
     "AutoPassLootAnnouncerTracker",
     "AutoPassLootAnnouncerPresetCode",
     "AutoPassLootAnnouncerArmPrompt",
+    "AutoPassLootAnnouncerRollWindow",
     "SlashCmdList",       -- the addon writes its handler into this table
     "StaticPopupDialogs", -- and its login prompt into this one
 }
@@ -42,6 +43,10 @@ read_globals = {
     "SendChatMessage", "StaticPopup_Show", "UIParent", "UISpecialFrames",
     "UnitGUID", "UnitName", "tinsert", "time", "wipe",
     "ChatFontNormal", "CloseDropDownMenus", "UIDropDownMenu_AddButton",
+    -- Blizzard's own group-loot frames, held back while a grace period runs.
+    -- The container is only in the newer UI, so its use is guarded.
+    "GroupLootContainer", "GroupLootContainer_RemoveFrame",
+    "GroupLootFrame_OpenNewFrame",
     "UIDropDownMenu_CreateInfo", "UIDropDownMenu_Initialize",
     "UIDropDownMenu_JustifyText", "UIDropDownMenu_SetText",
     "UIDropDownMenu_SetWidth",

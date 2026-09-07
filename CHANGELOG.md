@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased] - grace period (branch: feature/roll-grace-window)
+
+### Added
+- An optional grace period in front of the automatic roll, with a small
+  semi-transparent window listing what is about to be answered. Off by default,
+  and with it off nothing here runs: the roll is answered the moment it is read
+  and Blizzard's windows are left alone, exactly as before. The Grace button at
+  the bottom of the options panel cycles off, 3, 5, 8 and 12 seconds, and
+  `/apla grace <0-60>` sets any value. It is part of a preset, so a raid preset
+  can run it at 0 and a five-man preset at 8.
+- Each row in that window says what the addon is about to do and counts down to
+  it. Under them, the last few things that dropped and who took them, read
+  straight out of the drop log so the log's own quality slider filters them too.
+  A drop that is still pending above is not repeated below.
+- Clicking a row takes that one roll back: the pending auto-roll is dropped and
+  Blizzard's own window opens for that item with the full remaining timer on
+  it, around 115 of the server's 120 seconds. Nothing here shortens a roll.
+- There are deliberately no need, greed or pass buttons in it. With them, people
+  would click every row and the thing would have become Blizzard's roll window
+  with a shorter timer, which is worse than either. One action, "not this one",
+  and the UI built for the actual decision is one click away.
+- What keeps it from being that window is which way round the default sits:
+  doing nothing here still rolls for you as configured, where doing nothing in
+  Blizzard's window loses you the item.
+- Blizzard's roll frames are held back only for rolls the addon has taken
+  responsibility for. Anything set to Window in the grid, below uncommon, or
+  that the addon could not identify keeps its normal frame.
+- The window remembers where you drag it. It is only on screen while something
+  is happening, so `/apla roll` pins it up to be found and dragged; it takes
+  itself off eight seconds after the last roll clears.
+- Rolls are timed by C_Timer rather than by the window, so one still fires on
+  time with the window hidden or the game sitting on a loading screen. The
+  window only draws the bars.
+- CANCEL_LOOT_ROLL drops a pending row, so a roll that ends some other way --
+  somebody else acting, the master looter stepping in, the group breaking up --
+  does not leave a row counting down to nothing.
+
 ## [1.6.0] - 2026-09-07
 
 ### Added

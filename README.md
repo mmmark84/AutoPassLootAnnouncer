@@ -10,6 +10,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 - **Presets** for whole sets of settings, so the night's raid rules and the way you loot a five-man are two clicks apart, with a one-line code to share either
 - **Announces on the roll**, not on the corpse, so you see drops even when someone else loots the body
+- **An optional grace period** before it rolls, with a small window listing what is about to be answered and one click to take any of it back
 - **One line per item**, to your choice of channel
 - **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
@@ -60,7 +61,7 @@ There is no Save button, deliberately. The live settings **are** the active pres
 
 | | |
 | --- | --- |
-| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, drop tracking and the log's quality filter, and all three roll grids |
+| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the grace period, drop tracking and the log's quality filter, and all three roll grids |
 | **Not in a preset** | **At login**, where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
@@ -96,6 +97,7 @@ A code pasted straight after `/apla preset`, with no keyword, is recognised as o
 | `q` | Announce threshold, 0 to 5 |
 | `pe` | Pepe mode |
 | `t`, `tq` | Drop tracking, and its threshold |
+| `g` | Grace period in seconds, 0 for off |
 | `bop`, `boe`, `bes` | The three roll grids, one letter per quality from uncommon up: `w`indow, `p`ass, `g`reed, `n`eed |
 | `p` | Chat prefix |
 
@@ -137,6 +139,42 @@ The point of the split is that quality on its own is a poor guide to whether a d
 `GetItemInfo` returns nothing until the client has cached the item, and unlike bind type there is no roll-level fallback for stack size. The addon retries for a few seconds against a two-minute roll, and only waits on an answer it will actually use — a BoP drop never waits on its stack size. If something still has not resolved, the roll is left alone rather than guessed at.
 
 Bind-on-pickup prompts are only auto-confirmed for rolls the addon made itself. A prompt raised by your own click still waits for you.
+
+### Grace period
+
+Off by default. **Grace** at the bottom of the options panel cycles through off, 3, 5, 8 and 12 seconds; `/apla grace <0-60>` sets any value.
+
+With it off, nothing below applies and the addon behaves as it always has: a roll is answered the moment it is read, and Blizzard's roll windows are left alone.
+
+With it on, a roll the addon is going to answer is held for that many seconds first, and a small semi-transparent window lists what is pending:
+
+```
+┌────────────────────────────────────────┐
+│ [Pattern: Swiftheal Mantle]  Pass ▓▓▓ 3s│
+│ [Heart of Darkness] x2       Pass ▓░░ 1s│
+├────────────────────────────────────────┤
+│ Bloodfist Helmet ............... Isaari │
+│ Mark of the Illidari x59 ...... stacked │
+└────────────────────────────────────────┘
+```
+
+Each row says what the addon is about to do and counts down to it. Underneath, the last few things that dropped and who took them — the drop log's newest rows, so the log's own quality slider filters this too.
+
+**Doing nothing still rolls for you.** That is the whole point, and it is what stops this being Blizzard's roll window with a shorter timer:
+
+| | Blizzard's roll window | This |
+| --- | --- | --- |
+| Doing nothing | loses you the item | rolls as configured |
+| Frames on screen | one per item, up to four | one, a row per item |
+| Clicks in a normal night | one per item | none |
+
+**Click a row to take that one back.** The pending auto-roll is dropped and Blizzard's own window opens for that item, with the **full remaining roll timer** on it — around 115 of the server's 120 seconds. Nothing here shortens a roll. There are deliberately no need/greed/pass buttons: the UI built for that decision is one click away and is better at it.
+
+Blizzard's window is only held back for rolls the addon has taken responsibility for. Anything set to **Window** in the grid, or below uncommon, or that the addon could not identify, gets its normal frame exactly as before.
+
+Drag the window to move it; it remembers where you put it. Since it is only on screen when something is happening, `/apla roll` pins it up so you can find it and drag it, and again to unpin. It takes itself off screen eight seconds after the last roll clears.
+
+Grace is part of a preset, so a raid preset can run it at 0 and a five-man preset at 8.
 
 ### Drop tracker
 
@@ -214,6 +252,8 @@ this one and nothing breaks without it.
 | `/apla announce` | Toggle chat output (off prints locally) |
 | `/apla login <off\|on\|ask>` | What automated rolling does at login |
 | `/apla loot` | Open or close the drop log |
+| `/apla roll` | Pin or unpin the roll window, so it can be dragged |
+| `/apla grace <0-60>` | Seconds to wait before answering a roll; 0 answers straight away |
 | `/apla track` | Toggle drop tracking |
 | `/apla pepe` | Toggle pepe mode |
 | `/apla who` | Show the elected announcer and all peers |

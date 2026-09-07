@@ -32,6 +32,7 @@ local defaults = {
                            -- Account-wide, not per preset: it is a question about
                            -- this session rather than about a role, and when it is
                            -- "ask" the prompt is where you pick the preset anyway.
+    grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
     track        = false,  -- keep a log of what dropped; off until you ask for it
     trackMin     = 2,      -- log uncommon and better
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
@@ -50,7 +51,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe",
+    "announce", "channel", "minQuality", "prefix", "pepe", "grace",
     "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -73,6 +74,23 @@ local function NextLoginArm(cur)
     end
     return LOGIN_ARM_ORDER[1]
 end
+-- How long the addon sits on a roll before answering it. A cycle button like
+-- the one above rather than a slider, so it costs no height in a full panel.
+local GRACE_STEPS = { 0, 3, 5, 8, 12 }
+
+local function NextGrace(cur)
+    for i, v in ipairs(GRACE_STEPS) do
+        if v == cur then return GRACE_STEPS[i % #GRACE_STEPS + 1] end
+    end
+    return GRACE_STEPS[1]
+end
+
+local function GraceLabel(v)
+    v = tonumber(v) or 0
+    if v <= 0 then return "off" end
+    return v .. "s"
+end
+
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
 
 -- Uncommon is the lowest quality the addon will answer for. Poor and common are
@@ -212,6 +230,17 @@ end
 
 -- rolls this addon made itself, so we only auto-confirm BoP prompts we caused
 local autoRolls = {}
+
+-- Answering a roll, once something has decided what the answer is. Split out
+-- because the grace period answers from a timer rather than from ProcessRoll.
+local function DoRoll(rollID, action, link)
+    autoRolls[rollID] = action
+    RollOnLoot(rollID, action)               -- 0 pass, 1 need, 2 greed
+    C_Timer.After(10, function() autoRolls[rollID] = nil end)
+    if action == 1 and link then
+        print("|cff66ccffAPLA|r auto-needed: " .. link)
+    end
+end
 
 -- Returns nil for "leave the roll window up and let the user decide".
 local function RollAction(quality, bop, stackable)
@@ -494,6 +523,7 @@ local function EncodePreset(name, v)
         ("pe=%d"):format(v.pepe and 1 or 0),
         ("t=%d"):format(v.track and 1 or 0),
         ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
+        ("g=%d"):format(tonumber(v.grace) or defaults.grace),
         ("bop=%s"):format(EncodeActions(v.actionsBoP)),
         ("boe=%s"):format(EncodeActions(v.actionsBoE)),
         ("bes=%s"):format(EncodeActions(v.actionsBoEStack)),
@@ -539,6 +569,7 @@ local function DecodePreset(code)
         pepe       = flag("pe", defaults.pepe),
         track      = flag("t", defaults.track),
         trackMin   = num("tq", 0, 5, defaults.trackMin),
+        grace      = num("g", 0, 60, defaults.grace),
         prefix     = f.p and Unesc(f.p) or defaults.prefix,
         actionsBoP      = DecodeActions(f.bop or ""),
         actionsBoE      = DecodeActions(f.boe or ""),
@@ -577,6 +608,7 @@ local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
 local LogDrop, LogMoney, ClearLog, RefreshTracker, ToggleTracker
+local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, ToggleRollWindow
 
 ----------------------------------------------------------------
 -- Output
@@ -724,15 +756,19 @@ local function ProcessRoll(rollID, tries)
 
     local action = RollAction(quality, bop, stackable)
     Dbg("action for roll %d = %s", rollID, tostring(action))
-    if action then
-        autoRolls[rollID] = action
-        RollOnLoot(rollID, action)               -- 0 pass, 1 need, 2 greed
-        C_Timer.After(10, function() autoRolls[rollID] = nil end)
-        if action == 1 and link then
-            print("|cff66ccffAPLA|r auto-needed: " .. link)
-        end
-    else
+    if not action then
         print("|cff66ccffAPLA|r left for you to roll: " .. (link or ("roll #" .. rollID)))
+        return
+    end
+
+    -- With grace off the answer goes out here and now, exactly as it always
+    -- has. With it on, the roll window takes the roll and answers it when the
+    -- countdown runs out, unless you claim it first.
+    local grace = tonumber(db.grace) or 0
+    if grace <= 0 then
+        DoRoll(rollID, action, link)
+    else
+        AddPendingRoll(rollID, action, link, grace)
     end
 end
 
@@ -1794,6 +1830,27 @@ local function BuildPanel()
             .. "button to open it. The list is kept between logins until you clear it.",
         function(v) db.track = v; RefreshTracker() end)
 
+    -- On the bottom bar rather than a row of its own: the panel is already as
+    -- tall as some people's screens, and this is a cycle button like At login
+    -- rather than anything that wants a slider's width.
+    panel.grace = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+    panel.grace:SetSize(150, 22)
+    panel.grace:SetPoint("BOTTOMLEFT", 16, 12)
+    panel.grace:SetScript("OnClick", function()
+        db.grace = NextGrace(tonumber(db.grace) or 0)
+        RefreshPanel()
+        RefreshRollWindow()
+    end)
+    AttachTooltip(panel.grace, "Grace period", {
+        "How long the addon waits before answering a roll it is going to answer. Click to cycle.",
+        "|cffffd100Off|r - answered the moment it drops, and Blizzard's roll windows are left alone.",
+        "Anything else puts a small window on screen listing what is about to be answered, with "
+            .. "a countdown on each row. Blizzard's window is held back for those rolls only.",
+        "Click a row there to take that one back: the auto-roll is dropped and the normal roll "
+            .. "window opens for it, with the full timer still on it.",
+        "Doing nothing still rolls for you. That is the point of it.",
+    })
+
     local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     test:SetSize(80, 22)
     test:SetPoint("BOTTOMRIGHT", -12, 12)
@@ -1812,6 +1869,7 @@ function RefreshPanel()
     panel.pepe:SetChecked(db.pepe)
     panel.track:SetChecked(db.track)
     panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
+    panel.grace:SetText("Grace: " .. GraceLabel(db.grace))
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
     panel.SelectQuality(panel.quality or 4)
@@ -2122,6 +2180,424 @@ end
 -- Redrawing after a preset has been switched, renamed or imported. A preset
 -- reaches into all three windows and into the announcer election, so rather
 -- than have every caller remember which, they all go through here.
+
+----------------------------------------------------------------
+-- Roll window
+----------------------------------------------------------------
+-- A grace period in front of the automatic roll, and a small heads-up display
+-- saying what is about to be answered for you.
+--
+-- The thing this is careful not to become is Blizzard's roll window with a
+-- shorter timer. What keeps it from being that is which way round the default
+-- sits: doing nothing here still means the addon rolls as configured, where
+-- doing nothing in Blizzard's window loses you the item. So the window has
+-- exactly one action, and it is "not this one" -- click a row and the pending
+-- roll is dropped and that item handed back to Blizzard's own frame with the
+-- whole of the server's two minutes still on it. Need, greed and pass are not
+-- duplicated here; the UI built for that decision is one click away and is
+-- better at it than anything that would fit in a row.
+--
+-- With grace at 0 none of this runs and the addon behaves exactly as it did
+-- before: no window, no suppression, the roll answered the moment it is read.
+local ROLL_W          = 320
+local ROLL_ROW_H      = 18
+local ROLL_RECENT_H   = 16
+local MAX_ROLL_ROWS   = 8    -- a raid boss drops five or six at once at most
+local MAX_ROLL_RECENT = 5
+local ROLL_LINGER     = 8    -- seconds the recent list stays up after the last roll
+
+local rollWin
+local pendingRolls = {}   -- [rollID] = { action, link, grace, deadline }
+local suppressed   = {}   -- [rollID] = true while we hold the default frame down
+local lingerUntil  = 0
+local rollPinned   = false   -- /apla roll, so the thing can be found and dragged
+local LayoutRollWindow       -- defined below, called from the redraw above it
+
+----------------------------------------------------------------
+-- Blizzard's own roll frames
+----------------------------------------------------------------
+-- Held down rather than torn out: they are ordinary frames, and the addon only
+-- ever hides one belonging to a roll it has taken responsibility for. A roll it
+-- is not going to answer keeps its window exactly as before, which is what the
+-- Window action in the grid promises.
+local function EachDefaultFrame(fn)
+    for i = 1, 4 do
+        local f = _G["GroupLootFrame" .. i]
+        if f then fn(f) end
+    end
+end
+
+local function HideDefaultFrame(rollID)
+    EachDefaultFrame(function(f)
+        if f.rollID == rollID and f:IsShown() then
+            -- Newer builds lay these out through a container, which has to be
+            -- told or it leaves a hole where the frame was. Older ones have no
+            -- container and a plain Hide is the whole job.
+            if GroupLootContainer and GroupLootContainer_RemoveFrame then
+                GroupLootContainer_RemoveFrame(GroupLootContainer, f)
+            else
+                f:Hide()
+            end
+        end
+    end)
+end
+
+-- Blizzard's START_LOOT_ROLL handler and ours race, and it usually wins, so
+-- the frame is normally already up by the time we decide; HideDefaultFrame
+-- covers that. This covers the other order, where a frame opens afterwards.
+local function HookDefaultFrames()
+    EachDefaultFrame(function(f)
+        f:HookScript("OnShow", function(self)
+            if suppressed[self.rollID] then HideDefaultFrame(self.rollID) end
+        end)
+    end)
+end
+
+----------------------------------------------------------------
+-- The window
+----------------------------------------------------------------
+-- The same rows the drop log would show, newest first and cut short. It reads
+-- the log itself rather than keeping a second list, so the quality slider in
+-- the log window filters this too.
+local function RecentEntries()
+    -- START_LOOT_ROLL puts a winner-less row in the log for the same drop that
+    -- is sitting in the pending list above, and one item on two lines of a
+    -- 320-pixel window is noise. Skipped until it has a winner, at which point
+    -- it has stopped being the thing overhead and become the thing that
+    -- happened.
+    local waiting = {}
+    for _, p in pairs(pendingRolls) do
+        if p.itemID then waiting[p.itemID] = true end
+    end
+
+    local out, all = {}, db.loot.entries
+    for i = #all, 1, -1 do
+        if #out >= MAX_ROLL_RECENT then break end
+        local e = all[i]
+        local pending = waiting[e.id] and not e.winner and not e.stack
+        if not pending and EntryQuality(e) >= (db.trackMin or 0) then
+            out[#out + 1] = e
+        end
+    end
+    return out
+end
+
+-- Soonest deadline first, so rows leave from the top and the ones below do not
+-- shuffle upwards under the cursor
+local function SortedPending()
+    local out = {}
+    for rollID, p in pairs(pendingRolls) do out[#out + 1] = { id = rollID, p = p } end
+    table.sort(out, function(a, b)
+        if a.p.deadline == b.p.deadline then return a.id < b.id end
+        return a.p.deadline < b.p.deadline
+    end)
+    return out
+end
+
+function RefreshRollWindow()
+    if not rollWin then return end
+
+    local rolls  = SortedPending()
+    local recent = RecentEntries()
+    local now    = GetTime()
+    local nrolls = math.min(#rolls, MAX_ROLL_ROWS)
+
+    -- Nothing pending, nothing worth lingering over, and not pinned: get off
+    -- the screen. This window is a thing that happens, not a thing that sits.
+    if nrolls == 0 and not rollPinned and now > lingerUntil then
+        rollWin:Hide()
+        return
+    end
+
+    for i, row in ipairs(rollWin.rows) do
+        local r = rolls[i]
+        if r and i <= MAX_ROLL_ROWS then
+            local left = math.max(0, r.p.deadline - now)
+            local frac = r.p.grace > 0 and (left / r.p.grace) or 0
+            row.rollID = r.id
+            row.icon:SetTexture(select(10, GetItemInfo(r.p.link)) or UNKNOWN_ICON)
+            row.text:SetText(r.p.link or ("roll #" .. r.id))
+            row.action:SetText("|cffffd100" .. (ACTION_SHORT[r.p.action] or "?") .. "|r")
+            row.fill:SetWidth(math.max(1, 46 * frac))
+            row.secs:SetText(("%ds"):format(math.ceil(left)))
+            row:Show()
+        else
+            row.rollID = nil
+            row:Hide()
+        end
+    end
+
+    for i, row in ipairs(rollWin.recent) do
+        local e = recent[i]
+        if e then
+            row.link = e.link
+            row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
+            row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
+                or e.link)
+            row.who:SetText("|cff808080" .. (e.stack and "stacked" or (e.winner or "nobody"))
+                .. "|r")
+            row:Show()
+        else
+            row.link = nil
+            row:Hide()
+        end
+    end
+
+    LayoutRollWindow(nrolls)
+
+    -- a divider only when there is something on both sides of it
+    if nrolls > 0 and #recent > 0 then rollWin.rule:Show() else rollWin.rule:Hide() end
+    if nrolls == 0 and #recent == 0 then rollWin.hint:Show() else rollWin.hint:Hide() end
+
+    local h = 16
+    h = h + nrolls * ROLL_ROW_H
+    if nrolls > 0 and #recent > 0 then h = h + 7 end
+    h = h + #recent * ROLL_RECENT_H
+    if nrolls == 0 and #recent == 0 then h = h + ROLL_ROW_H end   -- the pinned hint
+    rollWin:SetHeight(h)
+    rollWin:Show()
+end
+
+local function ClaimRoll(rollID)
+    local p = pendingRolls[rollID]
+    if not p then return end
+    pendingRolls[rollID] = nil
+    suppressed[rollID] = nil
+
+    -- Handed back with whatever the server still has on it, which is most of
+    -- two minutes. Nothing here shortens a roll.
+    local left = GetLootRollTimeLeft(rollID)
+    if left and left > 0 and GroupLootFrame_OpenNewFrame then
+        GroupLootFrame_OpenNewFrame(rollID, left)
+        print("|cff66ccffAPLA|r yours to answer: " .. (p.link or ("roll #" .. rollID)))
+    else
+        print("|cff66ccffAPLA|r that roll is already over")
+    end
+    RefreshRollWindow()
+end
+
+local function FirePending(rollID)
+    local p = pendingRolls[rollID]
+    if not p then return end          -- claimed, or cancelled under us
+    pendingRolls[rollID] = nil
+    suppressed[rollID] = nil
+    lingerUntil = GetTime() + ROLL_LINGER
+    -- nothing is animating once the last row has gone, so the redraw that
+    -- takes the window off screen has to be scheduled rather than waited for
+    C_Timer.After(ROLL_LINGER + 0.1, RefreshRollWindow)
+
+    -- Answered by hand in the meantime, or expired: either way there is nothing
+    -- to answer and rolling into it would be an error in the client.
+    local left = GetLootRollTimeLeft(rollID)
+    if not left or left <= 0 then
+        Dbg("roll %d was gone by the time its grace ran out", rollID)
+        RefreshRollWindow()
+        return
+    end
+
+    DoRoll(rollID, p.action, p.link)
+    RefreshRollWindow()
+end
+
+-- The one door in from ProcessRoll. Timing is C_Timer's job rather than the
+-- window's, so a roll still fires on time with the window hidden, the game
+-- paused on a loading screen, or the user in another zone.
+function AddPendingRoll(rollID, action, link, grace)
+    pendingRolls[rollID] = {
+        action = action, link = link, itemID = ItemID(link),
+        grace = grace, deadline = GetTime() + grace,
+    }
+    suppressed[rollID] = true
+    HideDefaultFrame(rollID)
+    C_Timer.After(grace, function() FirePending(rollID) end)
+    RefreshRollWindow()
+end
+
+-- A roll that ends for any other reason: somebody else's action, the master
+-- looter stepping in, the group breaking up.
+function CancelPendingRoll(rollID)
+    if not pendingRolls[rollID] and not suppressed[rollID] then return end
+    pendingRolls[rollID] = nil
+    suppressed[rollID] = nil
+    RefreshRollWindow()
+end
+
+local function MakeRollRow(parent, h)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(h)
+
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(h - 5, h - 5)
+    row.icon:SetPoint("LEFT", 0, 0)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text:SetPoint("LEFT", h + 1, 0)
+    row.text:SetJustifyH("LEFT")
+
+    local hl = row:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    Fill(hl, 1, 1, 1, 0.10)
+
+    row:Hide()
+    return row
+end
+
+local function BuildRollWindow()
+    -- No frame template. This is a heads-up display rather than a panel, and
+    -- the inset art the addon's other windows use is too heavy and too opaque
+    -- to sit over the middle of the screen while you are fighting.
+    rollWin = CreateFrame("Frame", "AutoPassLootAnnouncerRollWindow", UIParent)
+    rollWin:SetSize(ROLL_W, 60)
+    rollWin:SetPoint("CENTER", 0, 180)
+    rollWin:SetMovable(true)
+    rollWin:EnableMouse(true)
+    rollWin:RegisterForDrag("LeftButton")
+    rollWin:SetScript("OnDragStart", rollWin.StartMoving)
+    rollWin:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, rel, x, y = self:GetPoint()
+        db.rollPos = { point = point, rel = rel, x = x, y = y }
+    end)
+    rollWin:SetClampedToScreen(true)
+    rollWin:SetFrameStrata("HIGH")   -- over the game world, under the dialogs
+    rollWin:Hide()
+
+    if db.rollPos then
+        rollWin:ClearAllPoints()
+        rollWin:SetPoint(db.rollPos.point, UIParent, db.rollPos.rel,
+            db.rollPos.x, db.rollPos.y)
+    end
+
+    local edge = rollWin:CreateTexture(nil, "BACKGROUND")
+    edge:SetAllPoints()
+    Fill(edge, 0, 0, 0, 0.25)
+
+    local bg = rollWin:CreateTexture(nil, "BORDER")
+    bg:SetPoint("TOPLEFT", 1, -1)
+    bg:SetPoint("BOTTOMRIGHT", -1, 1)
+    Fill(bg, 0, 0, 0, 0.55)   -- semi-transparent: it sits over the fight
+
+    rollWin.rule = rollWin:CreateTexture(nil, "ARTWORK")
+    rollWin.rule:SetHeight(1)
+    Fill(rollWin.rule, 1, 1, 1, 0.14)
+    rollWin.rule:Hide()
+
+    rollWin.hint = rollWin:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    rollWin.hint:SetPoint("TOPLEFT", 8, -8)
+    rollWin.hint:SetText("Nothing pending. Drag to move.")
+    rollWin.hint:Hide()
+
+    rollWin.rows = {}
+    for i = 1, MAX_ROLL_ROWS do
+        local row = MakeRollRow(rollWin, ROLL_ROW_H)
+        row:SetPoint("TOPLEFT", 8, -8 - (i - 1) * ROLL_ROW_H)
+        row:SetPoint("TOPRIGHT", -8, -8 - (i - 1) * ROLL_ROW_H)
+        row.text:SetWidth(ROLL_W - 130)
+
+        -- What the addon is about to do, so a row can be read without knowing
+        -- the grid off by heart.
+        row.action = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.action:SetPoint("RIGHT", -74, 0)
+        row.action:SetWidth(42)
+        row.action:SetJustifyH("RIGHT")
+
+        local track = row:CreateTexture(nil, "ARTWORK")
+        track:SetSize(46, 6)
+        track:SetPoint("RIGHT", -26, 0)
+        Fill(track, 1, 1, 1, 0.12)
+
+        row.fill = row:CreateTexture(nil, "OVERLAY")
+        row.fill:SetHeight(6)
+        row.fill:SetPoint("LEFT", track, "LEFT")
+        Fill(row.fill, 0.25, 0.8, 0.25, 0.9)
+
+        row.secs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.secs:SetPoint("RIGHT", -2, 0)
+        row.secs:SetWidth(22)
+        row.secs:SetJustifyH("RIGHT")
+
+        row:SetScript("OnEnter", function(self)
+            if not self.rollID then return end
+            local p = pendingRolls[self.rollID]
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            if p and p.link then GameTooltip:SetHyperlink(p.link) end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cffeda55fClick|r to stop the auto-roll and answer this one "
+                .. "yourself, with the full roll timer", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnClick", function(self)
+            if self.rollID then ClaimRoll(self.rollID) end
+        end)
+
+        rollWin.rows[i] = row
+    end
+
+    rollWin.recent = {}
+    for i = 1, MAX_ROLL_RECENT do
+        local row = MakeRollRow(rollWin, ROLL_RECENT_H)
+        row.text:SetWidth(ROLL_W - 130)
+
+        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who:SetPoint("RIGHT", -2, 0)
+        row.who:SetWidth(90)
+        row.who:SetJustifyH("RIGHT")
+
+        row:SetScript("OnEnter", function(self)
+            if not self.link then return end
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetHyperlink(self.link)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnClick", function(self)
+            if self.link then HandleModifiedItemClick(self.link) end
+        end)
+
+        rollWin.recent[i] = row
+    end
+
+    -- Only the countdown bars animate, so there is nothing to redraw once the
+    -- last pending row has gone: pinned and idle costs one table lookup a
+    -- frame. Throttled because a countdown does not need sixty of them.
+    local since = 0
+    rollWin:SetScript("OnUpdate", function(_, elapsed)
+        if not next(pendingRolls) then return end
+        since = since + elapsed
+        if since < 0.05 then return end
+        since = 0
+        RefreshRollWindow()
+    end)
+
+    HookDefaultFrames()
+end
+
+-- Rows hang from the top, so where the recent list starts depends on how many
+-- pending rows are above it. That number changes, so this runs on every redraw.
+function LayoutRollWindow(nrolls)
+    if not rollWin then return end
+    local y = 8 + nrolls * ROLL_ROW_H
+    if nrolls > 0 then
+        rollWin.rule:SetPoint("TOPLEFT", 8, -(y + 3))
+        rollWin.rule:SetPoint("TOPRIGHT", -8, -(y + 3))
+        y = y + 7
+    end
+    for i, row in ipairs(rollWin.recent) do
+        row:SetPoint("TOPLEFT", 8, -(y + (i - 1) * ROLL_RECENT_H))
+        row:SetPoint("TOPRIGHT", -8, -(y + (i - 1) * ROLL_RECENT_H))
+    end
+end
+
+function ToggleRollWindow()
+    if not rollWin then return end
+    rollPinned = not rollPinned
+    print("|cff66ccffAPLA|r roll window "
+        .. (rollPinned and "|cff00ff00pinned|r, drag it where you want it"
+            or "|cffff0000unpinned|r"))
+    RefreshRollWindow()
+end
+
 function RefreshAll()
     if panel and panel:IsShown() then
         RefreshPanel()   -- which ends by updating the minimap button too
@@ -2129,6 +2605,7 @@ function RefreshAll()
         UpdateButtonLook()
     end
     RefreshTracker()
+    RefreshRollWindow()
     -- whether this copy announces at all is part of a preset, so the group's
     -- election has to hear about it rather than wait for the next heartbeat
     SendHello(true)
@@ -2143,6 +2620,7 @@ f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("PLAYER_LOGOUT")
 f:RegisterEvent("START_LOOT_ROLL")
 f:RegisterEvent("CONFIRM_LOOT_ROLL")
+f:RegisterEvent("CANCEL_LOOT_ROLL")
 f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 f:RegisterEvent("CHAT_MSG_LOOT")
@@ -2218,6 +2696,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         BuildPresetCode()
         BuildArmPrompt()
         BuildTracker()
+        BuildRollWindow()
         UpdateButtonLook()
 
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
@@ -2291,6 +2770,11 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     elseif event == "START_LOOT_ROLL" then
         ProcessRoll(arg1, 0)
+
+    elseif event == "CANCEL_LOOT_ROLL" then
+        -- the roll went away without us: somebody else acted, the master
+        -- looter stepped in, the group broke up
+        CancelPendingRoll(arg1)
 
     elseif event == "CONFIRM_LOOT_ROLL" then
         -- needing or greeding a BoP item raises a confirmation. Only auto-answer it
@@ -2435,6 +2919,18 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     elseif cmd == "loot" then
         ToggleTracker()
         return
+    elseif cmd == "roll" then
+        ToggleRollWindow()
+        return
+    elseif cmd == "grace" then
+        local n = tonumber(val)
+        if n and n >= 0 and n <= 60 then
+            db.grace = math.floor(n)
+            print("|cff66ccffAPLA|r grace period: " .. GraceLabel(db.grace))
+            RefreshRollWindow()
+        else
+            print("|cff66ccffAPLA|r /apla grace <0-60>, seconds; 0 answers straight away")
+        end
     elseif cmd == "track" then
         db.track = not db.track
         print("|cff66ccffAPLA|r drop tracking: " .. tostring(db.track))
