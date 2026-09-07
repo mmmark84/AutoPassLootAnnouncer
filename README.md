@@ -58,7 +58,7 @@ There is no Save button, deliberately. The live settings **are** the active pres
 
 | | |
 | --- | --- |
-| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the At login setting, drop tracking and its own threshold, and all three roll grids |
+| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the At login setting, drop tracking and the log's quality filter, and all three roll grids |
 | **Not in a preset** | Where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
@@ -153,7 +153,11 @@ Two tabs: **Everything**, and **Mine** for what the character you are on took. M
 
 Stacked rows sit above the rest in both tabs. They are the part of the list that stays the same length however long the night runs, so they belong where they can be read at a glance. Everything else follows, newest first.
 
-The window resizes from the grip in its bottom-right corner and remembers both size and position. Hovering a row shows the item tooltip; shift-clicking drops the link into whatever you are typing. The slider at the bottom sets how far down the log goes, and the header carries the session start and a running coin total.
+The window resizes from the grip in its bottom-right corner and remembers both size and position. Hovering a row shows the item tooltip; shift-clicking drops the link into whatever you are typing. The header carries the session start and a running coin total.
+
+**The slider filters what you are looking at, not what gets kept.** With tracking on, everything that drops goes into the log — greys and quest items included — and the slider decides how far down the list you want to see, on both tabs. Drag it up to pull the night's epics out of a wall of vendor trash, drag it back down and they are all still there. When it is holding rows back the header says so: `4 of 63 lines`.
+
+A threshold on the way in would throw away rows you could never ask for again; a filter on the way out can always be widened.
 
 Rows come from `CHAT_MSG_LOOT`, which is the only thing the client sends that carries a winner's name or says how many of something changed hands. `START_LOOT_ROLL` adds a row too, but only for items that do not stack: it fires before anyone has won, so the row waits with no winner until a loot message fills it in. Stackables are left to the loot message alone, because counting them from both events would count them twice.
 
@@ -162,7 +166,7 @@ Two things follow from that:
 - **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
 - **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
 
-The log holds 500 rows and drops the oldest beyond that, which is far more than a night of trash once stackables have collapsed. It is shared across all your characters, like the rest of the addon's settings.
+The log holds 1000 rows and drops the oldest beyond that. Stackables collapse to one row each, so the count is really a count of one-off drops — but since tracking takes greys too, that is a few hours of hard farming rather than a whole week. It is shared across all your characters, like the rest of the addon's settings.
 
 ### Announcing
 

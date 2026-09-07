@@ -32,6 +32,26 @@
   straight after `/apla preset` is recognised as one.
 - The minimap tooltip names the preset you are on.
 
+### Changed
+- The slider at the bottom of the drop log now filters what is on screen
+  instead of setting what gets logged, on both tabs. It sits under a list and
+  reads as a filter, so it had better be one. With tracking on, everything that
+  drops is kept — greys and quest items included — and the slider decides how
+  far down the list you want to see. Drag it up to pull the night's epics out
+  of a wall of vendor trash, drag it back down and they are all still there.
+  A threshold on the way in threw away rows you could never ask for again,
+  where a filter on the way out can always be widened.
+- The log header says `4 of 63 lines` while the slider is holding rows back, so
+  a filtered list never looks like a session that did not happen. The count is
+  per tab, so Mine counts only what this character took.
+- Each row records the quality it was logged at, which is what the filter reads
+  rather than asking the client about an item it may since have forgotten. Rows
+  in a log written by an earlier version have their quality read back off the
+  item link's own colour the first time they are drawn.
+- The log holds 1000 rows rather than 500. With greys landing in it too, 500
+  was a couple of hours of trash before the epics started falling off the far
+  end.
+
 ## [1.5.1] - 2026-09-06
 
 ### Fixed

@@ -844,7 +844,15 @@ end
 -- the row waits with no winner until a loot message fills it in, and a row that
 -- is never filled in is a drop nobody took. Stackables are left to the loot
 -- message alone, because counting them from both events would count them twice.
-local MAX_LOOT_ROWS     = 500
+-- Tracking takes everything, and the slider in the log window filters what you
+-- are looking at rather than what gets kept. It reads as a filter, so it had
+-- better be one; and a threshold on the way in throws away rows you cannot ask
+-- for later, where a filter on the way out can always be widened.
+--
+-- The room is because of that: with greys and quest items now landing in the
+-- log too, 500 rows was a couple of hours of trash before the epics started
+-- falling off the far end.
+local MAX_LOOT_ROWS     = 1000
 local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
 
 -- "%s receives loot: %sx%d." and friends are format strings, not patterns, so
@@ -908,8 +916,9 @@ end
 function LogDrop(link, count, winner)
     if not db.track or not link then return end
 
+    -- Recorded on the row rather than asked of the item later: the log outlives
+    -- the client's item cache, and this is what the window filters on.
     local quality = QualityOf(link)
-    if not quality or quality < (db.trackMin or 2) then return end
 
     local id = ItemID(link)
     if not id then return end
@@ -933,7 +942,7 @@ function LogDrop(link, count, winner)
             end
         end
         entries[#entries + 1] = { id = id, link = link, count = count, stack = true,
-                                  by = { [winner] = count }, t = time() }
+                                  by = { [winner] = count }, q = quality, t = time() }
     elseif winner then
         -- fill the oldest row still waiting on this item, so names land in the
         -- order the rolls did rather than backwards
@@ -945,9 +954,10 @@ function LogDrop(link, count, winner)
                 return
             end
         end
-        entries[#entries + 1] = { id = id, link = link, count = 1, winner = winner, t = time() }
+        entries[#entries + 1] =
+            { id = id, link = link, count = 1, winner = winner, q = quality, t = time() }
     else
-        entries[#entries + 1] = { id = id, link = link, count = 1, t = time() }
+        entries[#entries + 1] = { id = id, link = link, count = 1, q = quality, t = time() }
     end
 
     db.loot.started = db.loot.started or time()
@@ -1737,31 +1747,51 @@ local TRACK_VIEWS = {
 -- rest, newest first within each. Stacks are the part of the list that stays
 -- the same length however long the night runs, so they belong at the top where
 -- they can be read at a glance instead of scrolled past.
+-- The quality a row was logged at. Rows written before the log recorded it
+-- fall back to the item's own link, which carries the colour whether or not
+-- the client still remembers the item, and the answer is kept on the row so
+-- the lookup happens once rather than on every redraw.
+local function EntryQuality(e)
+    if not e.q then e.q = QualityOf(e.link) or 0 end
+    return e.q
+end
+
+-- Returns the list, and how many rows this tab holds that the quality slider
+-- is hiding, so the header can own up to them.
 local function ViewEntries()
     local all  = db.loot.entries
     local mine = tracker.view == "mine"
     local me   = mine and Me() or nil
+    local min  = db.trackMin or 0
 
-    local stacks, singles = {}, {}
+    -- how much of this row belongs in this tab: the whole thing on Everything,
+    -- and on Mine your own share of a stack or nothing at all
+    local function share(e)
+        if not mine then return e.count end
+        if e.stack then return e.by and e.by[me] or 0 end
+        return e.winner == me and e.count or 0
+    end
+
+    local stacks, singles, hidden = {}, {}, 0
     for i = #all, 1, -1 do   -- newest first
         local e = all[i]
-        if e.stack then
-            if not mine then
+        local n = share(e)
+        if n > 0 then
+            if EntryQuality(e) < min then
+                hidden = hidden + 1
+            elseif e.stack and mine then
+                stacks[#stacks + 1] = { id = e.id, link = e.link, count = n,
+                                        stack = true, q = e.q, t = e.t }
+            elseif e.stack then
                 stacks[#stacks + 1] = e
             else
-                local n = e.by and e.by[me]
-                if n and n > 0 then
-                    stacks[#stacks + 1] =
-                        { id = e.id, link = e.link, count = n, stack = true, t = e.t }
-                end
+                singles[#singles + 1] = e
             end
-        elseif not mine or e.winner == me then
-            singles[#singles + 1] = e
         end
     end
 
     for _, e in ipairs(singles) do stacks[#stacks + 1] = e end
-    return stacks
+    return stacks, hidden
 end
 
 local function LayoutTracker()
@@ -1900,10 +1930,19 @@ local function BuildTracker()
         tracker.rows[i] = row
     end
 
-    -- the threshold lives here rather than in the settings panel: this is the
-    -- window where you notice the list filling up with things you do not want
+    -- Filters what is on screen, not what gets kept: tracking takes the lot.
+    -- It lives here rather than in the settings panel because this is the
+    -- window where you notice the list filling up with things you do not want.
+    --
+    -- The guard is against SetValue in RefreshTracker coming back round through
+    -- this handler and refreshing again; the client does not fire the handler
+    -- for a value that has not moved, but a redraw loop is not worth the risk.
     tracker.slider = MakeSlider(tracker, "APLATrackSlider", 0, 0, 5, "Poor", "Legendary",
-        "Log: ", MinLabel, function(v) db.trackMin = v end)
+        "Show: ", MinLabel, function(v)
+            if v == db.trackMin then return end
+            db.trackMin = v
+            RefreshTracker()
+        end)
     tracker.slider:ClearAllPoints()   -- bottom-anchored, so resizing leaves it alone
     tracker.slider:SetPoint("BOTTOMLEFT", 24, 52)
 
@@ -1936,13 +1975,16 @@ end
 function RefreshTracker()
     if not tracker or not tracker:IsShown() then return end
 
-    local entries = ViewEntries()
+    local entries, hidden = ViewEntries()
     local n = #entries
     local shown = tracker.visibleRows or 1
 
     local when = db.loot.started and date("%d %b %H:%M", db.loot.started) or "nothing yet"
-    tracker.stats:SetText(("%d %s since %s          %s%s"):format(
-        n, n == 1 and "line" or "lines", when,
+    -- "3 of 63" whenever the slider is holding rows back, so a short list never
+    -- looks like a session that did not happen
+    local count = hidden > 0 and ("%d of %d"):format(n, n + hidden) or tostring(n)
+    tracker.stats:SetText(("%s %s since %s          %s%s"):format(
+        count, (n + hidden) == 1 and "line" or "lines", when,
         GetCoinTextureString(db.loot.money or 0),
         db.track and "" or "   |cffff8000(tracking is off)|r"))
 
