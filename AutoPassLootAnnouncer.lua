@@ -32,6 +32,7 @@ local defaults = {
                            -- Account-wide, not per preset: it is a question about
                            -- this session rather than about a role, and when it is
                            -- "ask" the prompt is where you pick the preset anyway.
+    hud          = false,  -- the loot popup: say what dropped as it drops
     grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
     track        = false,  -- keep a log of what dropped; off until you ask for it
     trackMin     = 2,      -- log uncommon and better
@@ -51,7 +52,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe", "grace",
+    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace",
     "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -74,21 +75,37 @@ local function NextLoginArm(cur)
     end
     return LOGIN_ARM_ORDER[1]
 end
--- How long the addon sits on a roll before answering it. A cycle button like
--- the one above rather than a slider, so it costs no height in a full panel.
-local GRACE_STEPS = { 0, 3, 5, 8, 12 }
+-- The loot popup, as one cycle button rather than two controls. Showing what
+-- dropped and holding a roll long enough to take it back were asked for
+-- separately, and they are separable -- but they are points on one line, from
+-- "tell me nothing" through "tell me" to "tell me and wait for me", so one
+-- button walks it and the panel keeps its height.
+local HUD_STEPS = {
+    { hud = false, grace = 0  },
+    { hud = true,  grace = 0  },   -- says what dropped, answers rolls at once
+    { hud = true,  grace = 3  },
+    { hud = true,  grace = 5  },
+    { hud = true,  grace = 8  },
+    { hud = true,  grace = 12 },
+}
 
-local function NextGrace(cur)
-    for i, v in ipairs(GRACE_STEPS) do
-        if v == cur then return GRACE_STEPS[i % #GRACE_STEPS + 1] end
+local function NextHud(hud, grace)
+    grace = tonumber(grace) or 0
+    for i, step in ipairs(HUD_STEPS) do
+        if step.hud == (hud and true or false) and step.grace == grace then
+            return HUD_STEPS[i % #HUD_STEPS + 1]
+        end
     end
-    return GRACE_STEPS[1]
+    -- a grace set by slash command to something not on the list: the next
+    -- click starts the walk again rather than getting stuck
+    return HUD_STEPS[1]
 end
 
-local function GraceLabel(v)
-    v = tonumber(v) or 0
-    if v <= 0 then return "off" end
-    return v .. "s"
+local function HudLabel(hud, grace)
+    if not hud then return "off" end
+    grace = tonumber(grace) or 0
+    if grace <= 0 then return "drops only" end
+    return grace .. "s grace"
 end
 
 local CHANNEL_NAME = { "Say", "Party", "Raid", "Yell" }
@@ -523,6 +540,7 @@ local function EncodePreset(name, v)
         ("pe=%d"):format(v.pepe and 1 or 0),
         ("t=%d"):format(v.track and 1 or 0),
         ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
+        ("h=%d"):format(v.hud and 1 or 0),
         ("g=%d"):format(tonumber(v.grace) or defaults.grace),
         ("bop=%s"):format(EncodeActions(v.actionsBoP)),
         ("boe=%s"):format(EncodeActions(v.actionsBoE)),
@@ -569,6 +587,7 @@ local function DecodePreset(code)
         pepe       = flag("pe", defaults.pepe),
         track      = flag("t", defaults.track),
         trackMin   = num("tq", 0, 5, defaults.trackMin),
+        hud        = flag("h", defaults.hud),
         grace      = num("g", 0, 60, defaults.grace),
         prefix     = f.p and Unesc(f.p) or defaults.prefix,
         actionsBoP      = DecodeActions(f.bop or ""),
@@ -608,7 +627,7 @@ local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
 local LogDrop, LogMoney, ClearLog, RefreshTracker, ToggleTracker
-local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, ToggleRollWindow
+local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, ToggleRollWindow, NoteLoot
 
 ----------------------------------------------------------------
 -- Output
@@ -1007,6 +1026,7 @@ function LogDrop(link, count, winner)
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
     Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
     RefreshTracker()
+    NoteLoot(quality)   -- and put it on screen, if the popup is on
 end
 
 function LogMoney(copper)
@@ -1340,6 +1360,10 @@ end
 -- adding the bar cost one number rather than every coordinate underneath it.
 local PRESET_BAR_H = 34
 
+-- The bar of buttons across the bottom. Without it they sat on top of the
+-- last checkbox, which is what the panel used to end with.
+local BOTTOM_BAR_H = 26
+
 local presetCode           -- the share-code window, built alongside the panel
 local TogglePresetCode     -- defined with it, used by the panel and the menu
 
@@ -1569,7 +1593,7 @@ end
 
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 516 + PRESET_BAR_H)
+    panel:SetSize(340, 516 + PRESET_BAR_H + BOTTOM_BAR_H)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -1833,19 +1857,24 @@ local function BuildPanel()
     -- On the bottom bar rather than a row of its own: the panel is already as
     -- tall as some people's screens, and this is a cycle button like At login
     -- rather than anything that wants a slider's width.
-    panel.grace = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
-    panel.grace:SetSize(150, 22)
-    panel.grace:SetPoint("BOTTOMLEFT", 16, 12)
-    panel.grace:SetScript("OnClick", function()
-        db.grace = NextGrace(tonumber(db.grace) or 0)
+    panel.hud = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+    panel.hud:SetSize(160, 22)
+    panel.hud:SetPoint("BOTTOMLEFT", 16, 12)
+    panel.hud:SetScript("OnClick", function()
+        local step = NextHud(db.hud, db.grace)
+        db.hud, db.grace = step.hud, step.grace
         RefreshPanel()
         RefreshRollWindow()
     end)
-    AttachTooltip(panel.grace, "Grace period", {
-        "How long the addon waits before answering a roll it is going to answer. Click to cycle.",
-        "|cffffd100Off|r - answered the moment it drops, and Blizzard's roll windows are left alone.",
-        "Anything else puts a small window on screen listing what is about to be answered, with "
-            .. "a countdown on each row. Blizzard's window is held back for those rolls only.",
+    AttachTooltip(panel.hud, "Loot popup", {
+        "A small window that says what dropped, and optionally holds the roll long enough for "
+            .. "you to take it back. Click to cycle.",
+        "|cffffd100Off|r - nothing on screen. Rolls are answered the moment they drop and "
+            .. "Blizzard's roll windows are left alone, exactly as without this setting.",
+        "|cffffd100Drops only|r - lists what dropped and who took it, as it happens. Rolls are "
+            .. "still answered straight away. Needs Track drops on, since it reads that log.",
+        "|cffffd1003s and up|r - also holds each roll the addon is going to answer for that long "
+            .. "and counts down to it, with Blizzard's window held back for those rolls only.",
         "Click a row there to take that one back: the auto-roll is dropped and the normal roll "
             .. "window opens for it, with the full timer still on it.",
         "Doing nothing still rolls for you. That is the point of it.",
@@ -1869,7 +1898,7 @@ function RefreshPanel()
     panel.pepe:SetChecked(db.pepe)
     panel.track:SetChecked(db.track)
     panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
-    panel.grace:SetText("Grace: " .. GraceLabel(db.grace))
+    panel.hud:SetText("Popup: " .. HudLabel(db.hud, db.grace))
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
     panel.SelectQuality(panel.quality or 4)
@@ -2304,6 +2333,10 @@ function RefreshRollWindow()
 
     -- Nothing pending, nothing worth lingering over, and not pinned: get off
     -- the screen. This window is a thing that happens, not a thing that sits.
+    if not db.hud and not rollPinned then
+        rollWin:Hide()
+        return
+    end
     if nrolls == 0 and not rollPinned and now > lingerUntil then
         rollWin:Hide()
         return
@@ -2347,7 +2380,15 @@ function RefreshRollWindow()
 
     -- a divider only when there is something on both sides of it
     if nrolls > 0 and #recent > 0 then rollWin.rule:Show() else rollWin.rule:Hide() end
-    if nrolls == 0 and #recent == 0 then rollWin.hint:Show() else rollWin.hint:Hide() end
+    if nrolls == 0 and #recent == 0 then
+        -- The one dependency worth spelling out: the drops half of this window
+        -- reads the drop log, and there is no log until tracking is on.
+        rollWin.hint:SetText(db.track and "Nothing pending. Drag to move."
+            or "Turn on Track drops to list what you loot here.")
+        rollWin.hint:Show()
+    else
+        rollWin.hint:Hide()
+    end
 
     local h = 16
     h = h + nrolls * ROLL_ROW_H
@@ -2356,6 +2397,19 @@ function RefreshRollWindow()
     if nrolls == 0 and #recent == 0 then h = h + ROLL_ROW_H end   -- the pinned hint
     rollWin:SetHeight(h)
     rollWin:Show()
+end
+
+-- Something happened worth a look. Nothing animates once the last pending row
+-- has gone, so the redraw that eventually takes the window away has to be
+-- booked here rather than waited for.
+function NoteLoot(quality)
+    if not db.hud then return end
+    -- the same threshold the list itself uses, so the window does not pop up
+    -- for a grey it is not going to show
+    if (quality or 0) < (db.trackMin or 0) then return end
+    lingerUntil = GetTime() + ROLL_LINGER
+    C_Timer.After(ROLL_LINGER + 0.1, RefreshRollWindow)
+    RefreshRollWindow()
 end
 
 local function ClaimRoll(rollID)
@@ -2381,10 +2435,7 @@ local function FirePending(rollID)
     if not p then return end          -- claimed, or cancelled under us
     pendingRolls[rollID] = nil
     suppressed[rollID] = nil
-    lingerUntil = GetTime() + ROLL_LINGER
-    -- nothing is animating once the last row has gone, so the redraw that
-    -- takes the window off screen has to be scheduled rather than waited for
-    C_Timer.After(ROLL_LINGER + 0.1, RefreshRollWindow)
+    NoteLoot(5)   -- a roll we answered is always worth the linger
 
     -- Answered by hand in the meantime, or expired: either way there is nothing
     -- to answer and rolling into it would be an error in the client.
@@ -2922,11 +2973,20 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     elseif cmd == "roll" then
         ToggleRollWindow()
         return
+    elseif cmd == "popup" then
+        -- Turning the window off turns the grace off with it. A roll held back
+        -- with nowhere to see it is worse than either setting on its own.
+        db.hud = not db.hud
+        if not db.hud then db.grace = 0 end
+        print("|cff66ccffAPLA|r loot popup: " .. HudLabel(db.hud, db.grace))
+        RefreshRollWindow()
     elseif cmd == "grace" then
         local n = tonumber(val)
         if n and n >= 0 and n <= 60 then
             db.grace = math.floor(n)
-            print("|cff66ccffAPLA|r grace period: " .. GraceLabel(db.grace))
+            -- and the window on, for the same reason
+            if db.grace > 0 then db.hud = true end
+            print("|cff66ccffAPLA|r loot popup: " .. HudLabel(db.hud, db.grace))
             RefreshRollWindow()
         else
             print("|cff66ccffAPLA|r /apla grace <0-60>, seconds; 0 answers straight away")
