@@ -2619,7 +2619,13 @@ local function BuildRollWindow()
     end
     rollWin:EnableMouse(true)
     rollWin:SetClampedToScreen(true)
-    rollWin:SetFrameStrata("HIGH")   -- over the game world, under the dialogs
+    -- LOW, and deliberately the lowest of the addon's windows. This one is
+    -- always up, so it must never be the thing in front: at HIGH it sat over
+    -- the bags, which live there too. Everything in the default UI you can
+    -- open is MEDIUM or above, so from down here it covers none of it, and it
+    -- has no SetToplevel either -- clicking or dragging it must not promote it
+    -- past the panel it is behind.
+    rollWin:SetFrameStrata("LOW")
     rollWin:Hide()
 
     local function SavePos(self)

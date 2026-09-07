@@ -77,6 +77,12 @@
   five-man preset at 8 seconds.
 
 ### Fixed
+- The loot window no longer covers your bags. It was on the HIGH frame strata,
+  which is where the bag frames live, and it is a window that is always up, so
+  it must never be the thing in front. It sits on LOW now: everything in the
+  default UI you can open is MEDIUM or above, so from there it covers none of
+  it. It has no toplevel flag either, so clicking or dragging it cannot promote
+  it past whatever it is behind.
 - The options panel no longer draws the bottom row of buttons on top of the
   "Track drops" checkbox. The panel ended flush with its last checkbox, so
   anything anchored to the bottom edge landed on it.

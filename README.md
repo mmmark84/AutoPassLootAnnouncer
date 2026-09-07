@@ -181,7 +181,7 @@ Below the line, what already happened. A drop still pending above is not repeate
 | Scroll | The list scrolls when there is more than fits |
 | Close | The **X**, or `/apla popup` |
 
-Position and size are remembered between sessions, per account.
+Position and size are remembered between sessions, per account. It sits on a low frame strata on purpose: it is always up, so anything you open — bags, the character sheet, a merchant — comes over the top of it rather than the other way round.
 
 #### Right-click for options
 
