@@ -1,23 +1,38 @@
 # Changelog
 
-## [Unreleased] - loot popup (branch: feature/roll-grace-window)
+## [Unreleased] - loot window (branch: feature/roll-grace-window)
 
 ### Added
-- An optional loot popup: a small semi-transparent window that says what
-  dropped as it drops, and can hold each roll a few seconds first so you get a
-  chance to take one back. Off by default, and off means nothing on screen,
-  nothing held, and Blizzard's roll windows left alone -- exactly as before.
+- An optional loot window: what dropped, as it drops, and optionally a grace
+  period in front of the automatic roll so there is a moment to take one back.
+  Off by default, and off means nothing on screen, nothing held, and Blizzard's
+  roll windows left alone -- exactly as before.
 - One control rather than two. Showing what dropped and holding a roll long
   enough to react were asked for separately and are separable, but they are
   points on one line -- tell me nothing, tell me, tell me and wait for me -- so
   the Popup button at the bottom of the panel walks it: off, drops only, then
   3, 5, 8 and 12 seconds of grace.
-- "Drops only" works with no grace period at all, and works solo. It is the
-  half that answers "show me what I looted": the drop log's newest rows,
-  appearing as loot arrives and going away again eight seconds later. It reads
-  the log rather than keeping a second list, so the log's own quality slider
-  filters it, a grey never interrupts anything, and it needs Track drops on --
-  which the window says, when you have one on without the other.
+- Once on, the window stays on screen rather than appearing and vanishing. A
+  window that comes and goes cannot be found, aimed at or resized. Turning the
+  setting off is how it goes away, and the X in its header does that.
+- A header you can grab to move it, with the title and that X. It can also be
+  dragged by the body, because a window you have to aim at is a window you
+  swear at.
+- Resizable from the grip in the bottom-right corner, between 260x120 and
+  600x700: taller simply shows more lines. The list scrolls when there is more
+  than fits, and rows are built once and drawn into as it moves, so resizing
+  only decides how many are on show. Position and size are both remembered.
+- Right-click anywhere on it -- header, body or a row -- for the quality
+  threshold, offered as the qualities themselves rather than as a slider
+  position: each entry is the name in its own colour with a tick on the one in
+  force, so you pick the thing you want by looking at it. It is the same
+  setting as the slider in the drop log, so the two follow each other.
+- "Track drops" is in that menu too, because it is the one thing that can leave
+  the window empty, and the empty window tells you to turn it on.
+- "Drops only" works with no grace period at all, and works solo, which is the
+  half that answers "show me what I looted". The list is the drop log's newest
+  rows rather than a second list, so the log's own threshold filters it and
+  there is only ever one list to keep straight.
 - With a grace period, each pending row says what the addon is about to do and
   counts down to it. Clicking one takes that roll back: the auto-roll is
   dropped and Blizzard's own window opens for that item with the full remaining
@@ -33,20 +48,19 @@
 - Blizzard's roll frames are held back only for rolls the addon has taken
   responsibility for. Anything set to Window in the grid, below uncommon, or
   that the addon could not identify keeps its normal frame.
-- The window remembers where you drag it. Since it is only on screen while
-  something is happening, `/apla roll` pins it up to be found and dragged.
 - Rolls are timed by C_Timer rather than by the window, so one still fires on
-  time with the window hidden or the game sitting on a loading screen. The
-  window only draws the countdown bars, and stops even doing that once nothing
-  is pending.
+  time with the window closed, the game on a loading screen, or the row
+  scrolled out of sight. The window only draws the countdown bars, and stops
+  even doing that once nothing is pending.
 - CANCEL_LOOT_ROLL drops a pending row, so a roll that ends some other way --
   somebody else acting, the master looter stepping in, the group breaking up --
   does not leave a row counting down to nothing.
 - `/apla grace <0-60>` sets the hold and turns the window on with it;
-  `/apla popup` toggles the window and takes the hold down with it. A roll held
-  back with nowhere to see it is worse than either setting on its own, so the
-  two are kept consistent whichever way you set them.
-- Both are part of a preset, so a raid preset can run the popup off and a
+  `/apla popup`, or `/apla roll`, opens and closes it and takes the hold down
+  with it. A roll held back with nowhere to see it is worse than either
+  setting on its own, so the two are kept consistent whichever way you set
+  them.
+- Both are part of a preset, so a raid preset can run the window off and a
   five-man preset at 8 seconds.
 
 ### Fixed

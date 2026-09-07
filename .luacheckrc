@@ -49,5 +49,5 @@ read_globals = {
     "GroupLootFrame_OpenNewFrame",
     "UIDropDownMenu_CreateInfo", "UIDropDownMenu_Initialize",
     "UIDropDownMenu_JustifyText", "UIDropDownMenu_SetText",
-    "UIDropDownMenu_SetWidth",
+    "UIDropDownMenu_SetWidth", "ToggleDropDownMenu",
 }

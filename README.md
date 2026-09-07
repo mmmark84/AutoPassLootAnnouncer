@@ -10,7 +10,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 - **Presets** for whole sets of settings, so the night's raid rules and the way you loot a five-man are two clicks apart, with a one-line code to share either
 - **Announces on the roll**, not on the corpse, so you see drops even when someone else loots the body
-- **An optional loot popup** that says what dropped as it drops, and can hold each roll a few seconds so you get one click to take any of it back
+- **An optional loot window** that says what dropped as it drops — movable, resizable, scrollable — and can hold each roll a few seconds so you get one click to take any of it back
 - **One line per item**, to your choice of channel
 - **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
@@ -141,31 +141,57 @@ The point of the split is that quality on its own is a poor guide to whether a d
 
 Bind-on-pickup prompts are only auto-confirmed for rolls the addon made itself. A prompt raised by your own click still waits for you.
 
-### Loot popup
+### Loot window
 
 Off by default. **Popup** at the bottom of the options panel cycles through the settings; it is one control because the two things people asked for are points on one line, from "tell me nothing" through "tell me" to "tell me and wait for me".
 
 | Popup | What happens |
 | --- | --- |
-| Off | Nothing on screen. Rolls are answered the moment they drop and Blizzard's roll windows are left alone — exactly as without this setting |
-| Drops only | A small window lists what dropped and who took it, as it happens. Rolls are still answered straight away |
+| Off | No window. Rolls are answered the moment they drop and Blizzard's roll windows are left alone — exactly as without this setting |
+| Drops only | A window lists what dropped and who took it, as it happens. Rolls are still answered straight away |
 | 3s / 5s / 8s / 12s | Also holds each roll the addon is going to answer for that long, counting down, so you can take one back |
 
-**Drops only needs Track drops on**, because the list is the drop log's newest rows rather than a second list of its own — which also means the log's quality slider filters it. The window says so if you have one on without the other.
+**Once it is on, it stays on screen.** It does not appear and vanish — a window that comes and goes is one you cannot find, aim at, or resize. Turning it off is how you get rid of it, and the **X** in its header does exactly that.
 
 ```
-┌────────────────────────────────────────┐
-│ [Pattern: Swiftheal Mantle]  Pass ▓▓▓ 3s│
-│ [Heart of Darkness] x2       Pass ▓░░ 1s│
-├────────────────────────────────────────┤
-│ Bloodfist Helmet ............... Isaari │
-│ Mark of the Illidari x59 ...... stacked │
-└────────────────────────────────────────┘
+┌ Loot ─────────── right-click for options ── X ┐
+│ [Pattern: Swiftheal Mantle]      Pass ▓▓▓  3s │
+│ [Heart of Darkness] x2           Pass ▓░░  1s │
+├───────────────────────────────────────────────┤
+│ Bloodfist Helmet ..................... Isaari │
+│ Mark of the Illidari x59 ............ stacked │
+│ Linen Cloth x5 ...................... stacked │
+└──────────────────────────────────────────────◢┘
 ```
 
-The rows above the line are pending rolls: what the addon is about to do, and how long you have. Below it, what already happened. A drop that is still pending above is not repeated below.
+Above the line are pending rolls: what the addon is about to do, and how long you have. Below it, what already happened. A drop still pending above is not repeated below.
 
-#### Taking one back
+**Drops only needs Track drops on**, because the list is the drop log's newest rows rather than a second list of its own. The window says so if you have one on without the other.
+
+#### Moving, sizing, closing
+
+| | |
+| --- | --- |
+| Move | Drag the header, or anywhere on the body |
+| Resize | The grip in the bottom-right corner. Taller shows more lines |
+| Scroll | The list scrolls when there is more than fits |
+| Close | The **X**, or `/apla popup` |
+
+Position and size are remembered between sessions, per account.
+
+#### Right-click for options
+
+Right-clicking anywhere on it — header, body or a row — opens a short menu:
+
+| | |
+| --- | --- |
+| Track drops | Toggle the log the list reads from. It is here because it is the one thing that can leave the window empty |
+| Show | The quality threshold, as the qualities themselves: **Everything**, **Uncommon and better**, and so on up to **Legendary only**, each in its own colour with a tick on the one in force |
+| Close this window | Same as the X |
+
+The threshold is the **same setting** as the slider at the bottom of the drop log — one threshold, two places to reach it, so changing it in either place moves both. Offering the qualities by name and colour rather than as a slider position means you pick the thing you want by looking at it instead of translating a position into a quality.
+
+#### Taking a roll back
 
 **Click a pending row.** The auto-roll is dropped and Blizzard's own window opens for that item with the **full remaining roll timer** on it — around 115 of the server's 120 seconds. Nothing here shortens a roll.
 
@@ -181,11 +207,7 @@ There are deliberately no need/greed/pass buttons. The UI built for that decisio
 
 Blizzard's window is only held back for rolls the addon has taken responsibility for. Anything set to **Window** in the grid, or below uncommon, or that the addon could not identify, gets its normal frame exactly as before.
 
-#### Moving it
-
-Drag it; it remembers where you put it. Since it is only on screen when something is happening, **`/apla roll`** pins it up so you can find it and drag it, and again to unpin. It takes itself off eight seconds after the last thing happened.
-
-Both settings are part of a preset, so a raid preset can run the popup off and a five-man preset at 8 seconds. `/apla grace <0-60>` sets the hold and turns the window on with it; `/apla popup` toggles the window and takes the hold down with it, because a roll held back with nowhere to see it is worse than either setting alone.
+Both settings are part of a preset, so a raid preset can run the window off and a five-man preset at 8 seconds. `/apla grace <0-60>` sets the hold and turns the window on with it; `/apla popup` toggles the window and takes the hold down with it, because a roll held back with nowhere to see it is worse than either setting alone.
 
 #### Trying it out
 
@@ -267,9 +289,8 @@ this one and nothing breaks without it.
 | `/apla announce` | Toggle chat output (off prints locally) |
 | `/apla login <off\|on\|ask>` | What automated rolling does at login |
 | `/apla loot` | Open or close the drop log |
-| `/apla roll` | Pin or unpin the roll window, so it can be dragged |
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
-| `/apla popup` | Turn the loot popup on or off |
+| `/apla popup` | Open or close the loot window (`/apla roll` also works) |
 | `/apla track` | Toggle drop tracking |
 | `/apla pepe` | Toggle pepe mode |
 | `/apla who` | Show the elected announcer and all peers |

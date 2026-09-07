@@ -627,7 +627,7 @@ local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
 local LogDrop, LogMoney, ClearLog, RefreshTracker, ToggleTracker
-local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, ToggleRollWindow, NoteLoot
+local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
 
 ----------------------------------------------------------------
 -- Output
@@ -1026,7 +1026,7 @@ function LogDrop(link, count, winner)
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
     Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
     RefreshTracker()
-    NoteLoot(quality)   -- and put it on screen, if the popup is on
+    RefreshRollWindow()   -- a new line for the loot window, if it is open
 end
 
 function LogMoney(copper)
@@ -2211,36 +2211,37 @@ end
 -- than have every caller remember which, they all go through here.
 
 ----------------------------------------------------------------
--- Roll window
+-- Loot window
 ----------------------------------------------------------------
--- A grace period in front of the automatic roll, and a small heads-up display
--- saying what is about to be answered for you.
+-- What dropped, as it drops, and optionally a grace period in front of the
+-- automatic roll so there is a moment to take one back.
 --
 -- The thing this is careful not to become is Blizzard's roll window with a
 -- shorter timer. What keeps it from being that is which way round the default
 -- sits: doing nothing here still means the addon rolls as configured, where
--- doing nothing in Blizzard's window loses you the item. So the window has
--- exactly one action, and it is "not this one" -- click a row and the pending
--- roll is dropped and that item handed back to Blizzard's own frame with the
--- whole of the server's two minutes still on it. Need, greed and pass are not
--- duplicated here; the UI built for that decision is one click away and is
--- better at it than anything that would fit in a row.
+-- doing nothing in Blizzard's window loses you the item. So the pending rows
+-- have exactly one action, and it is "not this one" -- click a row and the
+-- pending roll is dropped and that item handed back to Blizzard's own frame
+-- with the whole of the server's two minutes still on it. Need, greed and pass
+-- are not duplicated here; the UI built for that decision is one click away
+-- and is better at it than anything that would fit in a row.
 --
--- With grace at 0 none of this runs and the addon behaves exactly as it did
--- before: no window, no suppression, the roll answered the moment it is read.
-local ROLL_W          = 320
-local ROLL_ROW_H      = 18
-local ROLL_RECENT_H   = 16
+-- It sits on screen for as long as the setting is on, rather than appearing and
+-- vanishing: a window that comes and goes is one nobody can find, aim at, or
+-- resize. Off is the way to get rid of it, and the X in its header is off.
+local ROLL_HEADER     = 22
+local ROLL_ROW_H      = 18   -- a pending roll
+local ROLL_RECENT_H   = 16   -- a line of what already happened
+local ROLL_FOOTER     = 8
 local MAX_ROLL_ROWS   = 8    -- a raid boss drops five or six at once at most
-local MAX_ROLL_RECENT = 5
-local ROLL_LINGER     = 8    -- seconds the recent list stays up after the last roll
+local MAX_ROLL_RECENT = 30   -- enough for the tallest the window is allowed to get
+local ROLL_MIN_W, ROLL_MIN_H = 260, 120
+local ROLL_MAX_W, ROLL_MAX_H = 600, 700
 
 local rollWin
-local pendingRolls = {}   -- [rollID] = { action, link, grace, deadline }
+local pendingRolls = {}   -- [rollID] = { action, link, itemID, grace, deadline }
 local suppressed   = {}   -- [rollID] = true while we hold the default frame down
-local lingerUntil  = 0
-local rollPinned   = false   -- /apla roll, so the thing can be found and dragged
-local LayoutRollWindow       -- defined below, called from the redraw above it
+local LayoutRollWindow    -- defined below, called from the redraw above it
 
 ----------------------------------------------------------------
 -- Blizzard's own roll frames
@@ -2285,15 +2286,14 @@ end
 ----------------------------------------------------------------
 -- The window
 ----------------------------------------------------------------
--- The same rows the drop log would show, newest first and cut short. It reads
--- the log itself rather than keeping a second list, so the quality slider in
--- the log window filters this too.
+-- The drop log's newest rows rather than a second list of its own, so the
+-- quality slider in the log window filters this too and there is only ever one
+-- list to keep straight.
 local function RecentEntries()
     -- START_LOOT_ROLL puts a winner-less row in the log for the same drop that
     -- is sitting in the pending list above, and one item on two lines of a
-    -- 320-pixel window is noise. Skipped until it has a winner, at which point
-    -- it has stopped being the thing overhead and become the thing that
-    -- happened.
+    -- small window is noise. Skipped until it has a winner, at which point it
+    -- has stopped being the thing overhead and become the thing that happened.
     local waiting = {}
     for _, p in pairs(pendingRolls) do
         if p.itemID then waiting[p.itemID] = true end
@@ -2325,26 +2325,23 @@ end
 
 function RefreshRollWindow()
     if not rollWin then return end
+    if not db.hud then rollWin:Hide(); return end
 
     local rolls  = SortedPending()
     local recent = RecentEntries()
     local now    = GetTime()
-    local nrolls = math.min(#rolls, MAX_ROLL_ROWS)
 
-    -- Nothing pending, nothing worth lingering over, and not pinned: get off
-    -- the screen. This window is a thing that happens, not a thing that sits.
-    if not db.hud and not rollPinned then
-        rollWin:Hide()
-        return
-    end
-    if nrolls == 0 and not rollPinned and now > lingerUntil then
-        rollWin:Hide()
-        return
-    end
+    -- However many are pending, only as many as there is window for. The ones
+    -- that do not fit are still answered on time: the countdown is C_Timer's
+    -- and the rows are only the picture of it.
+    local room  = rollWin:GetHeight() - ROLL_HEADER - ROLL_FOOTER
+    local npend = math.min(#rolls, MAX_ROLL_ROWS, math.max(0, math.floor(room / ROLL_ROW_H)))
+
+    local shown = LayoutRollWindow(npend)
 
     for i, row in ipairs(rollWin.rows) do
-        local r = rolls[i]
-        if r and i <= MAX_ROLL_ROWS then
+        local r = i <= npend and rolls[i] or nil
+        if r then
             local left = math.max(0, r.p.deadline - now)
             local frac = r.p.grace > 0 and (left / r.p.grace) or 0
             row.rollID = r.id
@@ -2360,8 +2357,11 @@ function RefreshRollWindow()
         end
     end
 
+    FauxScrollFrame_Update(rollWin.scroll, #recent, shown, ROLL_RECENT_H)
+    local offset = FauxScrollFrame_GetOffset(rollWin.scroll)
+
     for i, row in ipairs(rollWin.recent) do
-        local e = recent[i]
+        local e = (i <= shown) and recent[offset + i] or nil
         if e then
             row.link = e.link
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
@@ -2376,40 +2376,20 @@ function RefreshRollWindow()
         end
     end
 
-    LayoutRollWindow(nrolls)
-
     -- a divider only when there is something on both sides of it
-    if nrolls > 0 and #recent > 0 then rollWin.rule:Show() else rollWin.rule:Hide() end
-    if nrolls == 0 and #recent == 0 then
+    if npend > 0 and #recent > 0 then rollWin.rule:Show() else rollWin.rule:Hide() end
+
+    if npend == 0 and #recent == 0 then
         -- The one dependency worth spelling out: the drops half of this window
         -- reads the drop log, and there is no log until tracking is on.
-        rollWin.hint:SetText(db.track and "Nothing pending. Drag to move."
+        rollWin.hint:SetText(db.track and "Nothing yet."
             or "Turn on Track drops to list what you loot here.")
         rollWin.hint:Show()
     else
         rollWin.hint:Hide()
     end
 
-    local h = 16
-    h = h + nrolls * ROLL_ROW_H
-    if nrolls > 0 and #recent > 0 then h = h + 7 end
-    h = h + #recent * ROLL_RECENT_H
-    if nrolls == 0 and #recent == 0 then h = h + ROLL_ROW_H end   -- the pinned hint
-    rollWin:SetHeight(h)
     rollWin:Show()
-end
-
--- Something happened worth a look. Nothing animates once the last pending row
--- has gone, so the redraw that eventually takes the window away has to be
--- booked here rather than waited for.
-function NoteLoot(quality)
-    if not db.hud then return end
-    -- the same threshold the list itself uses, so the window does not pop up
-    -- for a grey it is not going to show
-    if (quality or 0) < (db.trackMin or 0) then return end
-    lingerUntil = GetTime() + ROLL_LINGER
-    C_Timer.After(ROLL_LINGER + 0.1, RefreshRollWindow)
-    RefreshRollWindow()
 end
 
 local function ClaimRoll(rollID)
@@ -2435,7 +2415,6 @@ local function FirePending(rollID)
     if not p then return end          -- claimed, or cancelled under us
     pendingRolls[rollID] = nil
     suppressed[rollID] = nil
-    NoteLoot(5)   -- a roll we answered is always worth the linger
 
     -- Answered by hand in the meantime, or expired: either way there is nothing
     -- to answer and rolling into it would be an error in the client.
@@ -2451,8 +2430,8 @@ local function FirePending(rollID)
 end
 
 -- The one door in from ProcessRoll. Timing is C_Timer's job rather than the
--- window's, so a roll still fires on time with the window hidden, the game
--- paused on a loading screen, or the user in another zone.
+-- window's, so a roll still fires on time with the window closed, the game
+-- paused on a loading screen, or the row scrolled out of sight.
 function AddPendingRoll(rollID, action, link, grace)
     pendingRolls[rollID] = {
         action = action, link = link, itemID = ItemID(link),
@@ -2473,9 +2452,89 @@ function CancelPendingRoll(rollID)
     RefreshRollWindow()
 end
 
+-- The X in the header, and /apla popup. Off takes the grace period with it: a
+-- roll held back with nowhere to see it is worse than either setting alone.
+function CloseRollWindow()
+    db.hud, db.grace = false, 0
+    RefreshRollWindow()
+    if panel and panel:IsShown() then RefreshPanel() end
+    print("|cff66ccffAPLA|r loot popup off, and the grace period with it")
+end
+
+----------------------------------------------------------------
+-- Right-click menu
+----------------------------------------------------------------
+-- The threshold, offered as the qualities themselves rather than as a slider
+-- position you have to translate: each row is the name in its own colour, with
+-- a tick on the one you are on, so you pick the thing you want by looking at
+-- it. Same setting as the slider in the drop log -- one threshold, two places
+-- to reach it -- so the log follows and vice versa.
+--
+-- "Track drops" is in here too, because it is the other thing that can leave
+-- this window empty, and the empty window says so.
+local rollMenu
+
+local function RollMenuInit(_, level)
+    level = level or 1
+    if level ~= 1 then return end
+
+    local function Add(fields)
+        local info = UIDropDownMenu_CreateInfo()
+        for k, v in pairs(fields) do info[k] = v end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    Add({
+        text = "Track drops",
+        checked = db.track and true or false,
+        func = function()
+            db.track = not db.track
+            RefreshTracker()
+            RefreshRollWindow()
+            if panel and panel:IsShown() then RefreshPanel() end
+        end,
+    })
+
+    Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
+    Add({ text = "Show", isTitle = true, notCheckable = true })
+
+    for q = 0, 5 do
+        Add({
+            -- MinLabel already colours the quality; it is written lower case
+            -- for the middle of a slider caption, which is not this
+            text = q == 0 and "Everything" or MinLabel(q),
+            checked = (db.trackMin or 0) == q,
+            func = function()
+                db.trackMin = q
+                RefreshTracker()
+                RefreshRollWindow()
+                CloseDropDownMenus()
+            end,
+        })
+    end
+
+    Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
+    Add({
+        text = "Close this window",
+        notCheckable = true,
+        func = function() CloseRollWindow() end,
+    })
+end
+
+local function ShowRollMenu()
+    if not rollMenu then
+        rollMenu = CreateFrame("Frame", "APLARollMenu", UIParent, "UIDropDownMenuTemplate")
+        UIDropDownMenu_Initialize(rollMenu, RollMenuInit, "MENU")
+    end
+    ToggleDropDownMenu(1, nil, rollMenu, "cursor", 0, 0)
+end
+
 local function MakeRollRow(parent, h)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(h)
+    -- A button swallows whatever it is not registered for, and the menu has to
+    -- be reachable over a row as much as beside one.
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(h - 5, h - 5)
@@ -2494,24 +2553,42 @@ local function MakeRollRow(parent, h)
 end
 
 local function BuildRollWindow()
-    -- No frame template. This is a heads-up display rather than a panel, and
-    -- the inset art the addon's other windows use is too heavy and too opaque
-    -- to sit over the middle of the screen while you are fighting.
+    -- No frame template. This one sits over the game while you are fighting,
+    -- so it gets a dark panel and a hairline rather than the inset art the
+    -- addon's other windows use, which is opaque and much heavier.
     rollWin = CreateFrame("Frame", "AutoPassLootAnnouncerRollWindow", UIParent)
-    rollWin:SetSize(ROLL_W, 60)
+    rollWin:SetSize(db.rollSize and db.rollSize.w or 320,
+                    db.rollSize and db.rollSize.h or 200)
     rollWin:SetPoint("CENTER", 0, 180)
     rollWin:SetMovable(true)
+    rollWin:SetResizable(true)
+    -- SetResizeBounds is the modern name for the pair below it, guarded the way
+    -- SetObeyStepOnDrag and SetColorTexture are
+    if rollWin.SetResizeBounds then
+        rollWin:SetResizeBounds(ROLL_MIN_W, ROLL_MIN_H, ROLL_MAX_W, ROLL_MAX_H)
+    else
+        rollWin:SetMinResize(ROLL_MIN_W, ROLL_MIN_H)
+        rollWin:SetMaxResize(ROLL_MAX_W, ROLL_MAX_H)
+    end
     rollWin:EnableMouse(true)
-    rollWin:RegisterForDrag("LeftButton")
-    rollWin:SetScript("OnDragStart", rollWin.StartMoving)
-    rollWin:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, rel, x, y = self:GetPoint()
-        db.rollPos = { point = point, rel = rel, x = x, y = y }
-    end)
     rollWin:SetClampedToScreen(true)
     rollWin:SetFrameStrata("HIGH")   -- over the game world, under the dialogs
     rollWin:Hide()
+
+    local function SavePos(self)
+        self:StopMovingOrSizing()
+        local point, _, rel, x, y = self:GetPoint()
+        db.rollPos = { point = point, rel = rel, x = x, y = y }
+    end
+
+    -- Draggable by the body as well as the header, because a window you have
+    -- to aim at is a window you swear at.
+    rollWin:RegisterForDrag("LeftButton")
+    rollWin:SetScript("OnDragStart", rollWin.StartMoving)
+    rollWin:SetScript("OnDragStop", SavePos)
+    rollWin:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then ShowRollMenu() end
+    end)
 
     if db.rollPos then
         rollWin:ClearAllPoints()
@@ -2521,12 +2598,43 @@ local function BuildRollWindow()
 
     local edge = rollWin:CreateTexture(nil, "BACKGROUND")
     edge:SetAllPoints()
-    Fill(edge, 0, 0, 0, 0.25)
+    Fill(edge, 1, 1, 1, 0.10)
 
     local bg = rollWin:CreateTexture(nil, "BORDER")
     bg:SetPoint("TOPLEFT", 1, -1)
     bg:SetPoint("BOTTOMRIGHT", -1, 1)
-    Fill(bg, 0, 0, 0, 0.55)   -- semi-transparent: it sits over the fight
+    Fill(bg, 0, 0, 0, 0.60)   -- semi-transparent: it sits over the fight
+
+    -- The header. Its own frame rather than a texture so it can be the thing
+    -- you grab, which is what a header is for.
+    local head = CreateFrame("Frame", nil, rollWin)
+    head:SetPoint("TOPLEFT", 1, -1)
+    head:SetPoint("TOPRIGHT", -1, -1)
+    head:SetHeight(ROLL_HEADER)
+    head:EnableMouse(true)
+    head:RegisterForDrag("LeftButton")
+    head:SetScript("OnDragStart", function() rollWin:StartMoving() end)
+    head:SetScript("OnDragStop", function() SavePos(rollWin) end)
+    head:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then ShowRollMenu() end
+    end)
+
+    local headBg = head:CreateTexture(nil, "ARTWORK")
+    headBg:SetAllPoints()
+    Fill(headBg, 1, 1, 1, 0.08)
+
+    local title = head:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("LEFT", 8, 0)
+    title:SetText("Loot")
+
+    local hintText = head:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hintText:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    hintText:SetText("right-click for options")
+
+    local close = CreateFrame("Button", nil, head, "UIPanelCloseButton")
+    close:SetSize(22, 22)
+    close:SetPoint("RIGHT", 1, 0)
+    close:SetScript("OnClick", function() CloseRollWindow() end)
 
     rollWin.rule = rollWin:CreateTexture(nil, "ARTWORK")
     rollWin.rule:SetHeight(1)
@@ -2534,16 +2642,14 @@ local function BuildRollWindow()
     rollWin.rule:Hide()
 
     rollWin.hint = rollWin:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    rollWin.hint:SetPoint("TOPLEFT", 8, -8)
-    rollWin.hint:SetText("Nothing pending. Drag to move.")
+    rollWin.hint:SetPoint("TOPLEFT", 8, -(ROLL_HEADER + 8))
+    rollWin.hint:SetPoint("TOPRIGHT", -8, -(ROLL_HEADER + 8))
+    rollWin.hint:SetJustifyH("LEFT")
     rollWin.hint:Hide()
 
     rollWin.rows = {}
     for i = 1, MAX_ROLL_ROWS do
         local row = MakeRollRow(rollWin, ROLL_ROW_H)
-        row:SetPoint("TOPLEFT", 8, -8 - (i - 1) * ROLL_ROW_H)
-        row:SetPoint("TOPRIGHT", -8, -8 - (i - 1) * ROLL_ROW_H)
-        row.text:SetWidth(ROLL_W - 130)
 
         -- What the addon is about to do, so a row can be read without knowing
         -- the grid off by heart.
@@ -2578,17 +2684,26 @@ local function BuildRollWindow()
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row:SetScript("OnClick", function(self)
-            if self.rollID then ClaimRoll(self.rollID) end
+        row:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then ShowRollMenu()
+            elseif self.rollID then ClaimRoll(self.rollID) end
         end)
 
         rollWin.rows[i] = row
     end
 
+    -- The recent list scrolls. Rows are built once and drawn into as it moves,
+    -- so resizing only has to decide how many of them are on show.
+    local scroll = CreateFrame("ScrollFrame", "APLARollScroll", rollWin,
+        "FauxScrollFrameTemplate")
+    scroll:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, ROLL_RECENT_H, RefreshRollWindow)
+    end)
+    rollWin.scroll = scroll
+
     rollWin.recent = {}
     for i = 1, MAX_ROLL_RECENT do
         local row = MakeRollRow(rollWin, ROLL_RECENT_H)
-        row.text:SetWidth(ROLL_W - 130)
 
         row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.who:SetPoint("RIGHT", -2, 0)
@@ -2602,16 +2717,32 @@ local function BuildRollWindow()
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row:SetScript("OnClick", function(self)
-            if self.link then HandleModifiedItemClick(self.link) end
+        row:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then ShowRollMenu()
+            elseif self.link then HandleModifiedItemClick(self.link) end
         end)
 
         rollWin.recent[i] = row
     end
 
+    local grip = CreateFrame("Button", nil, rollWin)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -2, 2)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function() rollWin:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function()
+        rollWin:StopMovingOrSizing()
+        db.rollSize = { w = rollWin:GetWidth(), h = rollWin:GetHeight() }
+        RefreshRollWindow()
+    end)
+
+    rollWin:SetScript("OnSizeChanged", RefreshRollWindow)
+
     -- Only the countdown bars animate, so there is nothing to redraw once the
-    -- last pending row has gone: pinned and idle costs one table lookup a
-    -- frame. Throttled because a countdown does not need sixty of them.
+    -- last pending row has gone: sitting open and idle costs one table lookup
+    -- a frame. Throttled because a countdown does not need sixty of them.
     local since = 0
     rollWin:SetScript("OnUpdate", function(_, elapsed)
         if not next(pendingRolls) then return end
@@ -2625,28 +2756,46 @@ local function BuildRollWindow()
 end
 
 -- Rows hang from the top, so where the recent list starts depends on how many
--- pending rows are above it. That number changes, so this runs on every redraw.
-function LayoutRollWindow(nrolls)
-    if not rollWin then return end
-    local y = 8 + nrolls * ROLL_ROW_H
-    if nrolls > 0 then
-        rollWin.rule:SetPoint("TOPLEFT", 8, -(y + 3))
-        rollWin.rule:SetPoint("TOPRIGHT", -8, -(y + 3))
+-- pending rows are above it, and how many of it fit depends on the height the
+-- window has been dragged to. Both change, so this runs on every redraw.
+-- Returns how many recent rows are on show.
+function LayoutRollWindow(npend)
+    if not rollWin then return 0 end
+    local w, h = rollWin:GetWidth(), rollWin:GetHeight()
+
+    local y = ROLL_HEADER + 4
+    for i, row in ipairs(rollWin.rows) do
+        row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL_ROW_H))
+        row:SetPoint("TOPRIGHT", -6, -(y + (i - 1) * ROLL_ROW_H))
+        row.text:SetWidth(math.max(40, w - 150))   -- icon, action, bar, seconds
+    end
+
+    y = y + npend * ROLL_ROW_H
+    if npend > 0 then
+        rollWin.rule:SetPoint("TOPLEFT", 6, -(y + 3))
+        rollWin.rule:SetPoint("TOPRIGHT", -6, -(y + 3))
         y = y + 7
     end
-    for i, row in ipairs(rollWin.recent) do
-        row:SetPoint("TOPLEFT", 8, -(y + (i - 1) * ROLL_RECENT_H))
-        row:SetPoint("TOPRIGHT", -8, -(y + (i - 1) * ROLL_RECENT_H))
-    end
-end
 
-function ToggleRollWindow()
-    if not rollWin then return end
-    rollPinned = not rollPinned
-    print("|cff66ccffAPLA|r roll window "
-        .. (rollPinned and "|cff00ff00pinned|r, drag it where you want it"
-            or "|cffff0000unpinned|r"))
-    RefreshRollWindow()
+    local shown = math.floor((h - y - ROLL_FOOTER) / ROLL_RECENT_H)
+    if shown < 0 then shown = 0 end
+    if shown > MAX_ROLL_RECENT then shown = MAX_ROLL_RECENT end
+
+    rollWin.scroll:ClearAllPoints()
+    rollWin.scroll:SetPoint("TOPLEFT", 4, -y)
+    rollWin.scroll:SetSize(math.max(1, w - 34), math.max(1, shown * ROLL_RECENT_H))
+
+    for i, row in ipairs(rollWin.recent) do
+        row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL_RECENT_H))
+        row:SetPoint("TOPRIGHT", -24, -(y + (i - 1) * ROLL_RECENT_H))   -- clear of the bar
+        row.text:SetWidth(math.max(40, w - 140))
+    end
+
+    rollWin.hint:ClearAllPoints()
+    rollWin.hint:SetPoint("TOPLEFT", 8, -(ROLL_HEADER + 8))
+    rollWin.hint:SetPoint("TOPRIGHT", -8, -(ROLL_HEADER + 8))
+
+    return shown
 end
 
 function RefreshAll()
@@ -2970,10 +3119,7 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     elseif cmd == "loot" then
         ToggleTracker()
         return
-    elseif cmd == "roll" then
-        ToggleRollWindow()
-        return
-    elseif cmd == "popup" then
+    elseif cmd == "popup" or cmd == "roll" then
         -- Turning the window off turns the grace off with it. A roll held back
         -- with nowhere to see it is worse than either setting on its own.
         db.hud = not db.hud
