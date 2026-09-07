@@ -2348,8 +2348,20 @@ function RefreshRollWindow()
             row.icon:SetTexture(select(10, GetItemInfo(r.p.link)) or UNKNOWN_ICON)
             row.text:SetText(r.p.link or ("roll #" .. r.id))
             row.action:SetText("|cffffd100" .. (ACTION_SHORT[r.p.action] or "?") .. "|r")
-            row.fill:SetWidth(math.max(1, 46 * frac))
             row.secs:SetText(("%ds"):format(math.ceil(left)))
+
+            -- Drains leftwards, and warms up as it goes, so how long is left
+            -- reads without the number being read. Kept faint: it is behind
+            -- an item link, and a link you cannot make out is worse than no
+            -- bar at all.
+            row.fill:SetWidth(math.max(1, row:GetWidth() * frac))
+            if frac > 0.5 then
+                Fill(row.fill, 0.20, 0.70, 0.25, 0.35)
+            elseif frac > 0.2 then
+                Fill(row.fill, 0.85, 0.65, 0.15, 0.35)
+            else
+                Fill(row.fill, 0.85, 0.25, 0.20, 0.40)
+            end
             row:Show()
         else
             row.rollID = nil
@@ -2653,24 +2665,32 @@ local function BuildRollWindow()
 
         -- What the addon is about to do, so a row can be read without knowing
         -- the grid off by heart.
+        -- The countdown is the row rather than a bar off to one side of it: a
+        -- band the full width, draining away leftwards behind the item, with
+        -- the item and the numbers drawn over the top. It reads at a glance
+        -- from the corner of your eye, which is the only way it is ever going
+        -- to be read, and it costs no width -- so the item name gets the room
+        -- the old 46-pixel bar was using.
+        --
+        -- Layers matter here. BACKGROUND and BORDER are both under ARTWORK,
+        -- where the icon is, and under OVERLAY, where the text is, so nothing
+        -- is drawn on top of the words.
+        local band = row:CreateTexture(nil, "BACKGROUND")
+        band:SetAllPoints()
+        Fill(band, 1, 1, 1, 0.05)
+
+        row.fill = row:CreateTexture(nil, "BORDER")
+        row.fill:SetPoint("TOPLEFT")
+        row.fill:SetPoint("BOTTOMLEFT")
+
         row.action = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.action:SetPoint("RIGHT", -74, 0)
+        row.action:SetPoint("RIGHT", -30, 0)
         row.action:SetWidth(42)
         row.action:SetJustifyH("RIGHT")
 
-        local track = row:CreateTexture(nil, "ARTWORK")
-        track:SetSize(46, 6)
-        track:SetPoint("RIGHT", -26, 0)
-        Fill(track, 1, 1, 1, 0.12)
-
-        row.fill = row:CreateTexture(nil, "OVERLAY")
-        row.fill:SetHeight(6)
-        row.fill:SetPoint("LEFT", track, "LEFT")
-        Fill(row.fill, 0.25, 0.8, 0.25, 0.9)
-
         row.secs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.secs:SetPoint("RIGHT", -2, 0)
-        row.secs:SetWidth(22)
+        row.secs:SetPoint("RIGHT", -4, 0)
+        row.secs:SetWidth(24)
         row.secs:SetJustifyH("RIGHT")
 
         row:SetScript("OnEnter", function(self)
@@ -2767,7 +2787,7 @@ function LayoutRollWindow(npend)
     for i, row in ipairs(rollWin.rows) do
         row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL_ROW_H))
         row:SetPoint("TOPRIGHT", -6, -(y + (i - 1) * ROLL_ROW_H))
-        row.text:SetWidth(math.max(40, w - 150))   -- icon, action, bar, seconds
+        row.text:SetWidth(math.max(40, w - 110))   -- icon, action, seconds
     end
 
     y = y + npend * ROLL_ROW_H

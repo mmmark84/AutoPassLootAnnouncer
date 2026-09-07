@@ -155,8 +155,10 @@ Off by default. **Popup** at the bottom of the options panel cycles through the 
 
 ```
 ┌ Loot ─────────── right-click for options ── X ┐
-│ [Pattern: Swiftheal Mantle]      Pass ▓▓▓  3s │
-│ [Heart of Darkness] x2           Pass ▓░░  1s │
+│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░│
+│▓[Pattern: Swiftheal Mantle]▓▓▓▓▓▓▓▓ Pass   3s░│   ← green, draining left
+│▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+│▓[Heart of Darkness] x2░░░░░░░░░░░░░ Pass   1s░│   ← red, nearly out
 ├───────────────────────────────────────────────┤
 │ Bloodfist Helmet ..................... Isaari │
 │ Mark of the Illidari x59 ............ stacked │
@@ -164,7 +166,9 @@ Off by default. **Popup** at the bottom of the options panel cycles through the 
 └──────────────────────────────────────────────◢┘
 ```
 
-Above the line are pending rolls: what the addon is about to do, and how long you have. Below it, what already happened. A drop still pending above is not repeated below.
+Above the line are pending rolls. **The countdown is the row itself**: a band the full width of it, draining away leftwards behind the item name, so how long is left reads from the corner of your eye without the number being read. It warms from green through amber to red as it goes. The seconds are there beside it for when you want the exact figure.
+
+Below the line, what already happened. A drop still pending above is not repeated below.
 
 **Drops only needs Track drops on**, because the list is the drop log's newest rows rather than a second list of its own. The window says so if you have one on without the other.
 

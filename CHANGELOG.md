@@ -34,10 +34,16 @@
   rows rather than a second list, so the log's own threshold filters it and
   there is only ever one list to keep straight.
 - With a grace period, each pending row says what the addon is about to do and
-  counts down to it. Clicking one takes that roll back: the auto-roll is
-  dropped and Blizzard's own window opens for that item with the full remaining
-  timer on it, around 115 of the server's 120 seconds. Nothing here shortens a
-  roll.
+  counts down to it. The countdown is the row rather than a bar off to one side
+  of it: a band the full width, draining away leftwards behind the item name
+  and warming from green through amber to red, with the seconds beside it for
+  when the exact figure is wanted. It reads from the corner of your eye, which
+  is the only way it was ever going to be read in a fight, and it costs no
+  width, so the item name gets the room the old bar was using. Kept faint,
+  because an item link you cannot make out is worse than no bar at all.
+- Clicking a pending row takes that roll back: the auto-roll is dropped and
+  Blizzard's own window opens for that item with the full remaining timer on
+  it, around 115 of the server's 120 seconds. Nothing here shortens a roll.
 - There are deliberately no need, greed or pass buttons in it. With them people
   would click every row and the thing would have become Blizzard's roll window
   with a shorter timer, which is worse than either. One action, "not this one",
