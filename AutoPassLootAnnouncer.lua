@@ -36,9 +36,26 @@ local defaults = {
     debug        = false,  -- /apla debug: log every roll decision
     minimapAngle = 200,
     minimapHide  = false,
+    -- presets = { { name = ..., values = { ... } } } with activePreset pointing
+    -- into it, built in ADDON_LOADED out of whatever is already set
+}
+
+-- What a preset carries: everything that decides what gets announced and what
+-- gets rolled. Deliberately not in here are the things that belong to the
+-- account rather than to a role you switch into -- where the windows sit,
+-- whether the minimap button is shown, the drop log itself, the debug flag --
+-- and not `autopass` either, which is forced off at every login and so is
+-- never a stored setting in the first place.
+local PRESET_KEYS = {
+    "announce", "channel", "minQuality", "prefix", "pepe", "loginArm",
+    "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
 local db   -- declared before anything that reads it, or it resolves to a nil global
+
+-- Redrawing everything a preset can have changed. Defined down with the
+-- windows, once there is something to redraw.
+local RefreshAll
 
 local QUALITY_NAME = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary" }
 
@@ -203,6 +220,350 @@ local function RollAction(quality, bop, stackable)
     local a = db[ActionKey(bop, stackable)][quality]
     if a == nil or a < 0 then return nil end
     return a
+end
+
+----------------------------------------------------------------
+-- Presets
+----------------------------------------------------------------
+-- Presets are profiles rather than saved snapshots: the live settings *are*
+-- the active preset, so anything you change is already in it and there is no
+-- Save button to forget. Switching files the settings you are leaving back
+-- into the preset they came from first.
+--
+-- The live copy stays at the root of the saved variables, where it has always
+-- been, rather than moving inside the preset that owns it. Every read of a
+-- setting is still a plain db.channel, a file written by an earlier version
+-- loads unchanged, and a file written by this one still loads in that version.
+-- What it costs is that the active preset's stored values are a stale copy of
+-- the live ones; nothing reads them, because a preset's values are only ever
+-- read on the way in.
+local DEFAULT_PRESET_NAME = "Preset 1"
+local MAX_PRESET_NAME = 24
+
+local function CloneValues(src)
+    local out = {}
+    for _, key in ipairs(PRESET_KEYS) do
+        local v = src[key]
+        if type(v) == "table" then
+            local t = {}
+            for k, tv in pairs(v) do t[k] = tv end
+            out[key] = t
+        elseif v ~= nil then
+            out[key] = v
+        end
+    end
+    return out
+end
+
+-- Every quality in every kind ends up with an action, whatever the thing we
+-- read it from was short of: an older saved layout, a preset written before a
+-- kind existed, or a share code that never carried one.
+local function FillActions()
+    for _, kind in ipairs(KINDS) do
+        if type(db[kind.key]) ~= "table" then db[kind.key] = {} end
+        for q = MIN_ACTION_QUALITY, 5 do
+            if db[kind.key][q] == nil then db[kind.key][q] = DEFAULT_ACTION end
+        end
+        -- the rows below the grid that 1.3.x kept: those qualities are left
+        -- alone now, so a stored setting for them would never be read again
+        for q = 0, MIN_ACTION_QUALITY - 1 do db[kind.key][q] = nil end
+    end
+end
+
+local function ActivePreset()
+    return db.presets and db.presets[db.activePreset]
+end
+
+local function ActivePresetName()
+    local p = ActivePreset()
+    return p and p.name or DEFAULT_PRESET_NAME
+end
+
+-- files the settings you have right now back into the preset they belong to
+local function StoreActive()
+    local p = ActivePreset()
+    if p then p.values = CloneValues(db) end
+end
+
+local function ApplyValues(values)
+    for _, key in ipairs(PRESET_KEYS) do
+        local v = values and values[key]
+        if v == nil then v = defaults[key] end   -- a preset short of one takes the default
+        if type(v) == "table" then
+            local t = {}
+            for k, tv in pairs(v) do t[k] = tv end
+            db[key] = t
+        else
+            db[key] = v
+        end
+    end
+    -- the action tables are not in `defaults` (a table there would be shared by
+    -- reference), so anything missing lands here as nil and is filled in
+    FillActions()
+end
+
+local function EnsurePresets()
+    if type(db.presets) ~= "table" then db.presets = {} end
+
+    -- Throw out anything not shaped like a preset, so a hand-edited or
+    -- half-written file cannot leave the menu with a hole in it.
+    for i = #db.presets, 1, -1 do
+        local p = db.presets[i]
+        if type(p) ~= "table" or type(p.name) ~= "string" or type(p.values) ~= "table" then
+            table.remove(db.presets, i)
+        end
+    end
+
+    if #db.presets == 0 then
+        -- First run under this version: whatever is set right now becomes the
+        -- one preset, so nothing changes for anyone who never opens the menu.
+        db.presets[1] = { name = DEFAULT_PRESET_NAME, values = CloneValues(db) }
+        db.activePreset = 1
+    end
+
+    db.activePreset = tonumber(db.activePreset) or 1
+    if not db.presets[db.activePreset] then db.activePreset = 1 end
+end
+
+local function CleanName(name)
+    name = tostring(name or ""):match("^%s*(.-)%s*$")
+    if name == "" then return nil end
+    return name:sub(1, MAX_PRESET_NAME)
+end
+
+-- "Preset 3" when 1 and 2 are taken, whatever they have since been renamed to
+local function SuggestName()
+    local taken = {}
+    for _, p in ipairs(db.presets) do taken[p.name:lower()] = true end
+    local n = #db.presets + 1
+    while taken[("preset %d"):format(n)] do n = n + 1 end
+    return ("Preset %d"):format(n)
+end
+
+-- Two presets under one name makes the menu unreadable and a lookup by name
+-- ambiguous, so a clash takes a number instead of being allowed to happen.
+-- `skip` is the preset being renamed, which does not clash with itself.
+local function UniqueName(name, skip)
+    local taken = {}
+    for i, p in ipairs(db.presets) do
+        if i ~= skip then taken[p.name:lower()] = true end
+    end
+    if not taken[name:lower()] then return name end
+    local n = 2
+    while taken[(("%s %d"):format(name, n)):lower()] do n = n + 1 end
+    return ("%s %d"):format(name, n)
+end
+
+-- an index or a name, so the slash command takes whichever you have to hand
+local function FindPreset(want)
+    local i = tonumber(want)
+    if i and db.presets[i] then return i end
+    want = tostring(want or ""):lower()
+    if want == "" then return nil end
+    for j, p in ipairs(db.presets) do
+        if p.name:lower() == want then return j end
+    end
+    return nil
+end
+
+local function SelectPreset(i)
+    local p = db.presets[i]
+    if not p then return false end
+    if i ~= db.activePreset then
+        StoreActive()
+        db.activePreset = i
+        ApplyValues(p.values)
+    end
+    if RefreshAll then RefreshAll() end
+    print("|cff66ccffAPLA|r preset: |cffffd100" .. p.name .. "|r")
+    return true
+end
+
+local function NewPreset(name)
+    name = UniqueName(CleanName(name) or SuggestName())
+    StoreActive()
+    db.presets[#db.presets + 1] = { name = name, values = CloneValues(db) }
+    db.activePreset = #db.presets
+    -- a copy of what is already live, so there is nothing to apply
+    if RefreshAll then RefreshAll() end
+    print(("|cff66ccffAPLA|r new preset |cffffd100%s|r, a copy of your current settings")
+        :format(name))
+    return db.activePreset
+end
+
+local function RenameActive(name)
+    name = CleanName(name)
+    local p = ActivePreset()
+    if not name or not p then return false end
+    local was = p.name
+    p.name = UniqueName(name, db.activePreset)
+    if RefreshAll then RefreshAll() end
+    print(("|cff66ccffAPLA|r preset |cffffd100%s|r is now |cffffd100%s|r"):format(was, p.name))
+    return true
+end
+
+local function DeletePreset(i)
+    if not db.presets[i] then return false end
+    if #db.presets <= 1 then
+        print("|cff66ccffAPLA|r there has to be one preset left")
+        return false
+    end
+
+    local gone = db.presets[i].name
+    local wasActive = (i == db.activePreset)
+    table.remove(db.presets, i)
+
+    if wasActive then
+        -- whichever one took its place in the list, or the last one if the one
+        -- deleted was the last
+        db.activePreset = math.min(i, #db.presets)
+        ApplyValues(db.presets[db.activePreset].values)
+    elseif db.activePreset > i then
+        db.activePreset = db.activePreset - 1   -- everything after it shifted down
+    end
+
+    if RefreshAll then RefreshAll() end
+    print(("|cff66ccffAPLA|r deleted |cffffd100%s|r, now on |cffffd100%s|r")
+        :format(gone, ActivePresetName()))
+    return true
+end
+
+----------------------------------------------------------------
+-- Share codes
+----------------------------------------------------------------
+-- One line you can paste into chat or a forum post. Labelled fields rather
+-- than a positional CSV: a positional line breaks the moment a setting is
+-- added in the middle of it, where an unknown label can simply be ignored and
+-- a missing one falls back to the default. The version at the front is so a
+-- code that genuinely cannot be read says so instead of half-importing.
+local CODE_TAG     = "APLA"
+local CODE_VERSION = 1
+
+-- One letter per action, so an action string reads as itself: bop=wppg is
+-- window, pass, pass, greed for uncommon, rare, epic and legendary.
+local ACTION_CODE = { [-1] = "w", [0] = "p", [1] = "n", [2] = "g" }
+local CODE_ACTION = { w = -1, p = 0, n = 1, g = 2 }
+
+-- Everything but letters, digits and -_. is escaped, so a code comes out as
+-- one whitespace-free token that survives any copy and paste. Names and
+-- prefixes are short, so being blunt about it costs a few percent signs.
+local function Esc(s)
+    return (tostring(s or ""):gsub("[^%w%-_%.]", function(c)
+        return ("%%%02X"):format(c:byte())
+    end))
+end
+
+local function Unesc(s)
+    return (tostring(s or ""):gsub("%%(%x%x)", function(h)
+        return string.char(tonumber(h, 16))
+    end))
+end
+
+local function EncodeActions(t)
+    local out = {}
+    for q = MIN_ACTION_QUALITY, 5 do
+        out[#out + 1] = ACTION_CODE[t and t[q]] or ACTION_CODE[DEFAULT_ACTION]
+    end
+    return table.concat(out)
+end
+
+local function DecodeActions(s)
+    local t = {}
+    for q = MIN_ACTION_QUALITY, 5 do
+        local at = q - MIN_ACTION_QUALITY + 1
+        t[q] = CODE_ACTION[s:sub(at, at)] or DEFAULT_ACTION
+    end
+    return t
+end
+
+local function EncodePreset(name, v)
+    local parts = {
+        ("n=%s"):format(Esc(name)),
+        ("a=%d"):format(v.announce and 1 or 0),
+        ("c=%d"):format(tonumber(v.channel) or defaults.channel),
+        ("q=%d"):format(tonumber(v.minQuality) or defaults.minQuality),
+        ("pe=%d"):format(v.pepe and 1 or 0),
+        ("t=%d"):format(v.track and 1 or 0),
+        ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
+        ("la=%s"):format(LOGIN_ARM_LABEL[v.loginArm or ""] and v.loginArm or defaults.loginArm),
+        ("bop=%s"):format(EncodeActions(v.actionsBoP)),
+        ("boe=%s"):format(EncodeActions(v.actionsBoE)),
+        ("bes=%s"):format(EncodeActions(v.actionsBoEStack)),
+        -- last, because it is the only field whose length is worth reading past
+        ("p=%s"):format(Esc(v.prefix)),
+    }
+    return ("%s%d:%s"):format(CODE_TAG, CODE_VERSION, table.concat(parts, ","))
+end
+
+-- Returns name, values, version -- or nil and something to print. Unknown
+-- fields are ignored and missing ones left to the default, so a code from a
+-- later version still imports as much of itself as this one understands.
+local function DecodePreset(code)
+    code = tostring(code or ""):gsub("%s+", "")
+    local ver, body = code:match("^" .. CODE_TAG .. "(%d+):(.+)$")
+    if not ver then
+        return nil, ("that does not look like a preset code, they start with %s%d:")
+            :format(CODE_TAG, CODE_VERSION)
+    end
+
+    local f = {}
+    for key, value in body:gmatch("(%w+)=([^,]*)") do f[key] = value end
+    if not next(f) then return nil, "that code has no settings in it" end
+
+    local function num(key, lo, hi, fallback)
+        local n = tonumber(f[key])
+        if not n then return fallback end
+        n = math.floor(n)
+        if n < lo or n > hi then return fallback end
+        return n
+    end
+
+    local function flag(key, fallback)
+        if f[key] == "1" then return true end
+        if f[key] == "0" then return false end
+        return fallback
+    end
+
+    local v = {
+        announce   = flag("a", defaults.announce),
+        channel    = num("c", 1, 4, defaults.channel),
+        minQuality = num("q", 0, 5, defaults.minQuality),
+        pepe       = flag("pe", defaults.pepe),
+        track      = flag("t", defaults.track),
+        trackMin   = num("tq", 0, 5, defaults.trackMin),
+        loginArm   = LOGIN_ARM_LABEL[f.la or ""] and f.la or defaults.loginArm,
+        prefix     = f.p and Unesc(f.p) or defaults.prefix,
+        actionsBoP      = DecodeActions(f.bop or ""),
+        actionsBoE      = DecodeActions(f.boe or ""),
+        actionsBoEStack = DecodeActions(f.bes or ""),
+    }
+    return CleanName(f.n and Unesc(f.n)) or "Imported", v, tonumber(ver)
+end
+
+-- The active preset is the live settings, so its code comes off db rather than
+-- out of the stored copy, which is stale by design.
+local function ActiveCode()
+    return EncodePreset(ActivePresetName(), db)
+end
+
+-- Always a new preset, never over the top of one you already have: an import
+-- is the one thing here that arrives from outside and cannot be undone.
+local function ImportCode(code)
+    local name, v, ver = DecodePreset(code)
+    if not name then return false, v end
+    if ver > CODE_VERSION then
+        print(("|cff66ccffAPLA|r that code was written by a newer version (%d), importing "
+            .. "the parts this one understands"):format(ver))
+    end
+
+    StoreActive()
+    db.presets[#db.presets + 1] = { name = UniqueName(name), values = v }
+    db.activePreset = #db.presets
+    ApplyValues(v)
+    if RefreshAll then RefreshAll() end
+    print(("|cff66ccffAPLA|r imported |cffffd100%s|r and switched to it")
+        :format(db.presets[db.activePreset].name))
+    return true
 end
 
 local pending, flushScheduled = {}, false
@@ -656,6 +1017,7 @@ StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_ARM"] = {
 local function ButtonTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("Auto Pass Loot Announcer")
+    GameTooltip:AddDoubleLine("Preset", "|cffffd100" .. ActivePresetName() .. "|r")
     GameTooltip:AddDoubleLine("Auto-roll", db.autopass and "|cff00ff00ARMED|r" or "|cffff0000off|r")
     if db.autopass then
         GameTooltip:AddLine(ActionSummary(), 1, 1, 1, true)
@@ -829,9 +1191,241 @@ local function MakeSlider(parent, name, y, minv, maxv, low, high, caption, textF
     return sl
 end
 
+-- Height the preset bar adds to the top of the settings panel. Everything that
+-- was already in the panel hangs off a container shifted down by this much, so
+-- adding the bar cost one number rather than every coordinate underneath it.
+local PRESET_BAR_H = 34
+
+local presetCode           -- the share-code window, built alongside the panel
+local TogglePresetCode     -- defined with it, used by the panel and the menu
+
+StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_PRESET_NEW"] = {
+    text = "Name for the new preset\n\nIt starts as a copy of the settings you have now.",
+    button1 = "Create",
+    button2 = "Cancel",
+    hasEditBox = true,
+    maxLetters = MAX_PRESET_NAME,
+    OnShow = function(self)
+        local e = self.editBox or _G[self:GetName() .. "EditBox"]
+        e:SetText(SuggestName())
+        e:HighlightText()
+        e:SetFocus()
+    end,
+    OnAccept = function(self)
+        local e = self.editBox or _G[self:GetName() .. "EditBox"]
+        NewPreset(e:GetText())
+    end,
+    -- EditBox handlers are handed the box, not the popup
+    EditBoxOnEnterPressed = function(self)
+        NewPreset(self:GetText())
+        self:GetParent():Hide()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,   -- the low indices are the ones that pick up taint
+}
+
+StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_PRESET_RENAME"] = {
+    text = "Rename the preset\n\nIt is called %s now.",
+    button1 = "Rename",
+    button2 = "Cancel",
+    hasEditBox = true,
+    maxLetters = MAX_PRESET_NAME,
+    OnShow = function(self)
+        local e = self.editBox or _G[self:GetName() .. "EditBox"]
+        e:SetText(ActivePresetName())
+        e:HighlightText()
+        e:SetFocus()
+    end,
+    OnAccept = function(self)
+        local e = self.editBox or _G[self:GetName() .. "EditBox"]
+        RenameActive(e:GetText())
+    end,
+    EditBoxOnEnterPressed = function(self)
+        RenameActive(self:GetText())
+        self:GetParent():Hide()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_PRESET_DELETE"] = {
+    text = "Delete the preset %s?\n\nEverything set in it goes with it. Take its code first "
+        .. "if you might want it back.",
+    button1 = "Delete",
+    button2 = "Cancel",
+    -- the index is passed as StaticPopup_Show's data argument rather than read
+    -- off db here, so the prompt deletes the preset it was raised for
+    OnAccept = function(self) DeletePreset(self.data) end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+-- The presets themselves, then what you can do to them. One menu rather than a
+-- row of buttons: the list is the thing you came for and the rest is rare.
+local function PresetMenu(_, level)
+    level = level or 1
+    if level ~= 1 then return end
+
+    local function Add(fields)
+        local info = UIDropDownMenu_CreateInfo()
+        for k, v in pairs(fields) do info[k] = v end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    for i, p in ipairs(db.presets) do
+        Add({
+            text = p.name,
+            checked = (i == db.activePreset),
+            func = function()
+                SelectPreset(i)
+                CloseDropDownMenus()
+            end,
+        })
+    end
+
+    Add({ text = "", isTitle = true, notCheckable = true, disabled = true })   -- a rule
+
+    Add({
+        text = "New from current...",
+        notCheckable = true,
+        func = function() StaticPopup_Show("AUTOPASSLOOTANNOUNCER_PRESET_NEW") end,
+    })
+
+    Add({
+        text = "Rename...",
+        notCheckable = true,
+        func = function()
+            StaticPopup_Show("AUTOPASSLOOTANNOUNCER_PRESET_RENAME", ActivePresetName())
+        end,
+    })
+
+    Add({
+        text = "Delete " .. ActivePresetName(),
+        notCheckable = true,
+        -- there has to be one left, and the only one on offer here is the one
+        -- you are on, so with a single preset there is nothing to delete
+        disabled = #db.presets <= 1,
+        func = function()
+            StaticPopup_Show("AUTOPASSLOOTANNOUNCER_PRESET_DELETE",
+                ActivePresetName(), nil, db.activePreset)
+        end,
+    })
+
+    Add({
+        text = "Share code...",
+        notCheckable = true,
+        -- the menu is the only way to the code window, so the explanation of
+        -- what one is for rides along here
+        tooltipTitle = "Preset code",
+        tooltipText = "One line carrying this whole preset, to paste into chat "
+            .. "or take from someone who did.",
+        tooltipOnButton = true,
+        func = function()
+            CloseDropDownMenus()
+            TogglePresetCode()
+        end,
+    })
+end
+
+-- The box always opens on your own code, so the window is a share button first
+-- and an import field second.
+local function RefreshPresetCode()
+    if not presetCode then return end
+    presetCode.box:SetText(ActiveCode())
+    presetCode.box:HighlightText()
+    presetCode.box:SetFocus()
+end
+
+local function BuildPresetCode()
+    presetCode = CreateFrame("Frame", "AutoPassLootAnnouncerPresetCode", UIParent,
+        "BasicFrameTemplateWithInset")
+    presetCode:SetSize(420, 224)
+    presetCode:SetPoint("CENTER")
+    presetCode:SetMovable(true)
+    presetCode:EnableMouse(true)
+    presetCode:RegisterForDrag("LeftButton")
+    presetCode:SetScript("OnDragStart", presetCode.StartMoving)
+    presetCode:SetScript("OnDragStop", presetCode.StopMovingOrSizing)
+    presetCode:SetClampedToScreen(true)
+    presetCode:SetFrameStrata("DIALOG")   -- the same strata as the other two, see the panel
+    presetCode:SetToplevel(true)
+    presetCode:Hide()
+    tinsert(UISpecialFrames, "AutoPassLootAnnouncerPresetCode")   -- Escape closes it
+
+    local title = presetCode:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", 0, -6)
+    title:SetText("Preset code")
+
+    local help = presetCode:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    help:SetPoint("TOPLEFT", 14, -30)
+    help:SetPoint("TOPRIGHT", -14, -30)
+    help:SetJustifyH("LEFT")
+    help:SetText("Ctrl+A then Ctrl+C copies the line below. Paste someone else's in instead "
+        .. "and Import adds it as a new preset, leaving the ones you have alone.")
+
+    -- A dark box with a hairline round it, holding the one thing this window is
+    -- for. A code is a line or two long, so it fits without a scroll frame.
+    local well = CreateFrame("Frame", nil, presetCode)
+    well:SetPoint("TOPLEFT", 14, -78)
+    well:SetPoint("BOTTOMRIGHT", -14, 44)
+
+    local edge = well:CreateTexture(nil, "BACKGROUND")
+    edge:SetAllPoints()
+    Fill(edge, 1, 1, 1, 0.14)
+
+    local inner = well:CreateTexture(nil, "BORDER")
+    inner:SetPoint("TOPLEFT", 1, -1)
+    inner:SetPoint("BOTTOMRIGHT", -1, 1)
+    Fill(inner, 0, 0, 0, 0.72)
+
+    local box = CreateFrame("EditBox", nil, well)
+    box:SetPoint("TOPLEFT", 5, -4)
+    box:SetPoint("BOTTOMRIGHT", -5, 4)
+    box:SetMultiLine(true)
+    box:SetAutoFocus(false)
+    box:SetFontObject(ChatFontNormal)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    presetCode.box = box
+
+    local mine = CreateFrame("Button", nil, presetCode, "UIPanelButtonTemplate")
+    mine:SetSize(100, 22)
+    mine:SetPoint("BOTTOMLEFT", 14, 12)
+    mine:SetText("Show mine")
+    mine.tooltipText = "Put your own code back in the box."
+    mine:SetScript("OnClick", RefreshPresetCode)
+
+    local import = CreateFrame("Button", nil, presetCode, "UIPanelButtonTemplate")
+    import:SetSize(150, 22)
+    import:SetPoint("BOTTOMRIGHT", -14, 12)
+    import:SetText("Import as new preset")
+    import:SetScript("OnClick", function()
+        local ok, err = ImportCode(box:GetText())
+        if ok then
+            presetCode:Hide()
+        else
+            print("|cff66ccffAPLA|r " .. tostring(err))
+        end
+    end)
+
+    presetCode:SetScript("OnShow", RefreshPresetCode)
+end
+
+function TogglePresetCode()
+    if not presetCode then return end
+    if presetCode:IsShown() then presetCode:Hide() else presetCode:Show() end
+end
+
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 516)
+    panel:SetSize(340, 516 + PRESET_BAR_H)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -848,15 +1442,39 @@ local function BuildPanel()
     panel:Hide()
     tinsert(UISpecialFrames, "AutoPassLootAnnouncerPanel")   -- Escape closes it
 
+    -- Centred on the title text rather than hung off the top edge, and small
+    -- enough to sit inside the title bar: at 26 it hung far enough below the
+    -- bar to overlap the inset behind it.
     panel.icon = panel:CreateTexture(nil, "ARTWORK")
-    panel.icon:SetSize(26, 26)
-    panel.icon:SetPoint("TOPLEFT", 8, -3)
+    panel.icon:SetSize(18, 18)
+    panel.icon:SetPoint("LEFT", panel, "TOPLEFT", 8, -12)
 
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOP", 0, -6)
     title:SetText("Auto Pass Loot Announcer")
 
-    panel.pass = MakeCheck(panel, "APLACheckPass", "Roll automatically", 16, -34,
+    -- The preset bar, and then everything that was already here below it.
+    local presetLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    presetLabel:SetPoint("TOPLEFT", 20, -36)
+    presetLabel:SetText("Preset")
+
+    -- Takes the whole row, now that the menu is the only way in and there is
+    -- nothing sitting beside it. Ends level with the At login button below.
+    panel.presetDD = CreateFrame("Frame", "APLAPresetDropDown", panel, "UIDropDownMenuTemplate")
+    panel.presetDD:SetPoint("TOPLEFT", 40, -28)
+    UIDropDownMenu_SetWidth(panel.presetDD, 230)
+    UIDropDownMenu_Initialize(panel.presetDD, PresetMenu)
+    UIDropDownMenu_SetText(panel.presetDD, ActivePresetName())   -- correct from birth
+    if UIDropDownMenu_JustifyText then UIDropDownMenu_JustifyText(panel.presetDD, "LEFT") end
+
+    -- Everything under the bar hangs off this rather than off the panel, so
+    -- the bar could be added without moving every coordinate below it. It is a
+    -- plain container: no backdrop, no mouse, nothing but an origin.
+    local body = CreateFrame("Frame", nil, panel)
+    body:SetPoint("TOPLEFT", 0, -PRESET_BAR_H)
+    body:SetPoint("BOTTOMRIGHT")
+
+    panel.pass = MakeCheck(body, "APLACheckPass", "Roll automatically", 16, -34,
         "Master switch for the grid below. With everything set to Pass it just passes on the lot, "
             .. "the same net effect as Blizzard's Pass on Loot checkbox. Never carried between "
             .. "sessions; the button beside this one decides what happens at login.",
@@ -864,7 +1482,7 @@ local function BuildPanel()
 
     -- Sits on the checkbox's own line rather than a row of its own, which keeps
     -- it next to the thing it qualifies and leaves everything below where it is.
-    panel.loginArm = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    panel.loginArm = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     panel.loginArm:SetSize(120, 20)   -- ends at x=320, inside the frame's inset
     panel.loginArm:SetPoint("TOPLEFT", 200, -33)
     panel.loginArm:SetScript("OnClick", function()
@@ -878,26 +1496,26 @@ local function BuildPanel()
         "|cffffd100Ask|r - a prompt each time, so it is never on without you saying so.",
     })
 
-    panel.announce = MakeCheck(panel, "APLACheckAnnounce", "Announce to chat", 16, -60,
+    panel.announce = MakeCheck(body, "APLACheckAnnounce", "Announce to chat", 16, -60,
         "Off = print to your own chat frame only, nothing is sent to the group.",
         function(v) db.announce = v; SendHello(true) end)
 
-    panel.minimap = MakeCheck(panel, "APLACheckMinimap", "Show minimap button", 16, -86,
+    panel.minimap = MakeCheck(body, "APLACheckMinimap", "Show minimap button", 16, -86,
         nil,
         function(v)
             db.minimapHide = not v
             if v then button:Show() else button:Hide() end
         end)
 
-    panel.chSlider = MakeSlider(panel, "APLAChannelSlider", -126, 1, 4, "Say", "Yell",
+    panel.chSlider = MakeSlider(body, "APLAChannelSlider", -126, 1, 4, "Say", "Yell",
         "Announce up to: ", function(v) return CHANNEL_NAME[v] end,
         function(v) db.channel = v end)
     panel.chSlider.tooltipText = "The widest channel to use. It steps down to whatever is actually available: set to Raid, you get raid in a raid and party in a party."
 
-    panel.slider = MakeSlider(panel, "APLAQualitySlider", -170, 0, 5, "Poor", "Legendary",
+    panel.slider = MakeSlider(body, "APLAQualitySlider", -170, 0, 5, "Poor", "Legendary",
         "Announce: ", MinLabel, function(v) db.minQuality = v end)
 
-    panel.summary = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    panel.summary = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     panel.summary:SetPoint("TOPLEFT", 24, -326)
     panel.summary:SetWidth(292)
     panel.summary:SetJustifyH("LEFT")
@@ -931,12 +1549,12 @@ local function BuildPanel()
     panel.UpdateGrid = UpdateGrid
     panel.SelectQuality = SelectQuality
 
-    local gridHead = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local gridHead = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     gridHead:SetPoint("TOPLEFT", 24, -196)
     gridHead:SetText("What to do with each roll   |cff808080(below "
         .. QUALITY_NAME[MIN_ACTION_QUALITY]:lower() .. ": left alone)|r")
 
-    local headHover = CreateFrame("Frame", nil, panel)
+    local headHover = CreateFrame("Frame", nil, body)
     headHover:SetPoint("TOPLEFT", gridHead, "TOPLEFT", 0, 2)
     headHover:SetSize(gridHead:GetStringWidth(), 16)
     AttachTooltip(headHover, "Roll actions", {
@@ -953,7 +1571,7 @@ local function BuildPanel()
     local TAB_W, TAB_H = 71, 24
     panel.tabs = {}
     for q = MIN_ACTION_QUALITY, 5 do
-        local tb = MakeTab(panel, TAB_W, TAB_H, QUALITY_NAME[q])
+        local tb = MakeTab(body, TAB_W, TAB_H, QUALITY_NAME[q])
         tb:SetPoint("TOPLEFT", 22 + (q - MIN_ACTION_QUALITY) * (TAB_W + 3), -212)
         tb:SetScript("OnClick", function() SelectQuality(q) end)
         panel.tabs[q] = tb
@@ -961,7 +1579,7 @@ local function BuildPanel()
 
     -- a rule across the full width, so the active tab reads as sitting on the
     -- section it opens rather than floating above it
-    local tabRule = panel:CreateTexture(nil, "BACKGROUND")
+    local tabRule = body:CreateTexture(nil, "BACKGROUND")
     tabRule:SetPoint("TOPLEFT", 22, -236)
     tabRule:SetPoint("TOPRIGHT", -22, -236)
     tabRule:SetHeight(1)
@@ -969,8 +1587,8 @@ local function BuildPanel()
 
     local COLX = { 150, 195, 240, 285 }
     for i, a in ipairs(ACTIONS) do
-        local h = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        h:SetPoint("TOP", panel, "TOPLEFT", COLX[i] + 8, -244)
+        local h = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        h:SetPoint("TOP", body, "TOPLEFT", COLX[i] + 8, -244)
         h:SetText(a.label)
     end
 
@@ -981,18 +1599,18 @@ local function BuildPanel()
         local y = -260 - (r - 1) * 20
         local row = { key = kind.key, buttons = {} }
 
-        row.label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.label = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.label:SetPoint("TOPLEFT", 40, y - 2)
         row.label:SetText(kind.label)
 
-        local hover = CreateFrame("Frame", nil, panel)
+        local hover = CreateFrame("Frame", nil, body)
         hover:SetPoint("TOPLEFT", 36, y + 1)
         hover:SetSize(108, 18)
         AttachTooltip(hover, kind.label, kind.tip)
 
         for i, a in ipairs(ACTIONS) do
             local rb = CreateFrame("CheckButton", "APLAAction" .. r .. "_" .. i,
-                panel, "UIRadioButtonTemplate")
+                body, "UIRadioButtonTemplate")
             rb:SetPoint("TOPLEFT", COLX[i], y)
             rb:SetScript("OnClick", function()
                 db[kind.key][panel.quality] = a.value
@@ -1006,11 +1624,11 @@ local function BuildPanel()
 
     SelectQuality(4)   -- epic is the one people actually come here to set
 
-    local prefixLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local prefixLabel = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     prefixLabel:SetPoint("TOPLEFT", 24, -398)
     prefixLabel:SetText("Chat prefix")
 
-    local edit = CreateFrame("EditBox", "APLAPrefixEdit", panel, "InputBoxTemplate")
+    local edit = CreateFrame("EditBox", "APLAPrefixEdit", body, "InputBoxTemplate")
     edit:SetPoint("TOPLEFT", 96, -394)
     edit:SetSize(190, 20)
     edit:SetAutoFocus(false)
@@ -1058,17 +1676,17 @@ local function BuildPanel()
         end)
     end
 
-    panel.pepe = MakeCheck(panel, "APLACheckPepe", "Pepe mode", 16, -446,
+    panel.pepe = MakeCheck(body, "APLACheckPepe", "Pepe mode", 16, -446,
         "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
 
-    panel.track = MakeCheck(panel, "APLACheckTrack", "Track drops", 16, -474,
+    panel.track = MakeCheck(body, "APLACheckTrack", "Track drops", 16, -474,
         "Keeps a list of what dropped this session and who won it. Middle-click the minimap "
             .. "button to open it. The list is kept between logins until you clear it.",
         function(v) db.track = v; RefreshTracker() end)
 
-    local test = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     test:SetSize(80, 22)
     test:SetPoint("BOTTOMRIGHT", -12, 12)
     test:SetText("Test")
@@ -1079,6 +1697,7 @@ local function BuildPanel()
 end
 
 function RefreshPanel()
+    UIDropDownMenu_SetText(panel.presetDD, ActivePresetName())
     panel.pass:SetChecked(db.autopass)
     panel.announce:SetChecked(db.announce)
     panel.minimap:SetChecked(not db.minimapHide)
@@ -1360,12 +1979,28 @@ function ToggleTracker()
     if tracker:IsShown() then tracker:Hide() else tracker:Show() end
 end
 
+-- Redrawing after a preset has been switched, renamed or imported. A preset
+-- reaches into all three windows and into the announcer election, so rather
+-- than have every caller remember which, they all go through here.
+function RefreshAll()
+    if panel and panel:IsShown() then
+        RefreshPanel()   -- which ends by updating the minimap button too
+    else
+        UpdateButtonLook()
+    end
+    RefreshTracker()
+    -- whether this copy announces at all is part of a preset, so the group's
+    -- election has to hear about it rather than wait for the next heartbeat
+    SendHello(true)
+end
+
 ----------------------------------------------------------------
 -- Events
 ----------------------------------------------------------------
 local f = CreateFrame("Frame")
 f:RegisterEvent("ADDON_LOADED")
 f:RegisterEvent("PLAYER_LOGIN")
+f:RegisterEvent("PLAYER_LOGOUT")
 f:RegisterEvent("START_LOOT_ROLL")
 f:RegisterEvent("CONFIRM_LOOT_ROLL")
 f:RegisterEvent("CHAT_MSG_ADDON")
@@ -1417,15 +2052,9 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             end
         end
 
-        -- Fill any gap a file written by an older layout is short of, and drop
-        -- the rows below rare that 1.3.x kept: those qualities are left alone
-        -- now, so a stored setting for them would never be read again.
-        for _, kind in ipairs(KINDS) do
-            for q = MIN_ACTION_QUALITY, 5 do
-                if db[kind.key][q] == nil then db[kind.key][q] = DEFAULT_ACTION end
-            end
-            for q = 0, MIN_ACTION_QUALITY - 1 do db[kind.key][q] = nil end
-        end
+        -- fill any gap a file written by an older layout is short of, and drop
+        -- the rows below rare that 1.3.x kept
+        FillActions()
 
         -- never remembered between sessions. Whether it comes back on is the
         -- "At login" setting's business, handled at PLAYER_LOGIN once the rest
@@ -1439,8 +2068,14 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         db.loot.entries = db.loot.entries or {}
         db.loot.money   = db.loot.money or 0
 
+        -- Last, so the preset it makes on a first run under this version is a
+        -- copy of the settings after every migration above has run, not of the
+        -- half-converted ones on the way in.
+        EnsurePresets()
+
         BuildButton()
         BuildPanel()
+        BuildPresetCode()
         BuildTracker()
         UpdateButtonLook()
 
@@ -1449,6 +2084,12 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         elseif RegisterAddonMessagePrefix then
             RegisterAddonMessagePrefix(COMM_PREFIX)
         end
+
+    elseif event == "PLAYER_LOGOUT" then
+        -- The live settings are the active preset, so its stored copy is stale
+        -- all session. Nothing reads it while we are running, but filing it
+        -- back on the way out leaves the saved file consistent with itself.
+        StoreActive()
 
     elseif event == "CHAT_MSG_LOOT" then
         local link, count, who = ParseLoot(arg1 or "")
@@ -1524,13 +2165,75 @@ end)
 ----------------------------------------------------------------
 -- /apla
 ----------------------------------------------------------------
+-- The keywords below win over a preset that happens to share a name with one,
+-- which is what "use" is for.
+local function PresetCommand(line)
+    local word, rest = line:match("^(%S*)%s*(.-)%s*$")
+    local key = word:lower()
+
+    if key == "" or key == "list" then
+        print("|cff66ccffAPLA|r presets:")
+        for i, p in ipairs(db.presets) do
+            print(("  %d. %s%s"):format(i, p.name,
+                i == db.activePreset and "  |cff00ff00(active)|r" or ""))
+        end
+        -- No pipes in this line. The client reads them as escape sequences, so
+        -- "|number" would come out as a line break and "|code" as a colour.
+        print("  |cff888888switch with a name or a number, or say "
+            .. "new, rename, delete, code, import|r")
+
+    elseif key == "new" then
+        NewPreset(rest)
+
+    elseif key == "rename" then
+        if not RenameActive(rest) then print("|cff66ccffAPLA|r /apla preset rename <name>") end
+
+    elseif key == "delete" then
+        local i = FindPreset(rest ~= "" and rest or db.activePreset)
+        if i then
+            DeletePreset(i)
+        else
+            print("|cff66ccffAPLA|r no preset called " .. rest)
+        end
+
+    elseif key == "code" then
+        TogglePresetCode()
+
+    elseif key == "import" then
+        local ok, err = ImportCode(rest)
+        if not ok then print("|cff66ccffAPLA|r " .. err) end
+
+    else
+        local want = (key == "use") and rest or line
+        if want:match("^" .. CODE_TAG .. "%d+:") then
+            -- a share code pasted straight in, which is the only thing anyone
+            -- could have meant by it
+            local ok, err = ImportCode(want)
+            if not ok then print("|cff66ccffAPLA|r " .. err) end
+        else
+            local i = FindPreset(want)
+            if i then
+                SelectPreset(i)
+            else
+                print(("|cff66ccffAPLA|r no preset called %s  |cff888888(/apla preset lists them)|r")
+                    :format(want))
+            end
+        end
+    end
+end
+
 SLASH_AUTOPASSLOOTANNOUNCER1 = "/apla"
 SLASH_AUTOPASSLOOTANNOUNCER2 = "/lap"
 SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     local cmd, val = msg:lower():match("^(%S*)%s*(.-)%s*$")
+    -- The same argument with its case intact. Everything that was already here
+    -- wants it folded; preset names and share codes do not.
+    local raw = msg:match("^%s*%S*%s*(.-)%s*$")
     if cmd == "pass" then
         ToggleAutopass()
         return
+    elseif cmd == "preset" then
+        PresetCommand(raw)
     elseif cmd == "announce" then
         db.announce = not db.announce
         print("|cff66ccffAPLA|r chat announce: " .. tostring(db.announce))

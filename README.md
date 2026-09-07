@@ -8,6 +8,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 ## Features
 
+- **Presets** for whole sets of settings, so the night's raid rules and the way you loot a five-man are two clicks apart, with a one-line code to share either
 - **Announces on the roll**, not on the corpse, so you see drops even when someone else loots the body
 - **One line per item**, to your choice of channel
 - **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
@@ -38,6 +39,66 @@ Armed is never carried between sessions. What happens at login is the **At login
 | <img src="Media/icon-armed.png" width="48"> | Armed, the arrows turn green |
 
 For the addon to see rolls at all, Blizzard's own **Pass on Loot** option must be **off** (Interface → Combat). That option suppresses the roll server side and no addon can work around it.
+
+### Presets
+
+The addon's settings live in **presets**. The dropdown at the top of the options panel switches between them, and the entries under the list make, rename and delete them; what a preset does and does not carry is spelled out below. Like the rest of the addon, they are per account rather than per character.
+
+You start with one, called **Preset 1**, holding whatever you already had — a first run of this version changes nothing and there is nothing to set up. Rename it to something you recognise, then fork the next one off it.
+
+| Menu entry | Effect |
+| --- | --- |
+| A preset's name | Switch to it |
+| New from current... | A copy of what you have now, under a new name |
+| Rename... | Rename the one you are on |
+| Delete *name* | Delete the one you are on. The last one cannot be deleted |
+| Share code... | Open the code window |
+
+There is no Save button, deliberately. The live settings **are** the active preset, so a change you make is already in it; switching away files the one you are leaving and brings the other one in.
+
+| | |
+| --- | --- |
+| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the At login setting, drop tracking and its own threshold, and all three roll grids |
+| **Not in a preset** | Where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
+
+The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
+
+#### Share codes
+
+**Share code...** in the preset menu opens a window holding the active preset as one line. Ctrl+A then Ctrl+C copies it. Paste someone else's in instead and **Import as new preset** adds it alongside the ones you have and switches to it — it never writes over a preset you already had.
+
+Two to start from, if you want somewhere to begin. Paste either into the code window, or after `/apla preset import`:
+
+**Raider** — pass on everything, but stop on a bind-on-equip that does not stack, because somebody may have been waiting weeks for it. Announce rare and better, up to raid. Prompts at login before arming.
+
+```
+APLA1:n=Raider,a=1,c=3,q=3,pe=0,t=0,tq=2,la=ask,bop=pppp,boe=pwww,bes=pppp,p=Drop%3A
+```
+
+**Looter** — greed everything, decide epics and legendaries yourself. Announce uncommon and better, up to party, and log what dropped.
+
+```
+APLA1:n=Looter,a=1,c=2,q=2,pe=0,t=1,tq=2,la=off,bop=ggww,boe=gggg,bes=gggg,p=Drop%3A
+```
+
+A code pasted straight after `/apla preset`, with no keyword, is recognised as one.
+
+**The format** is labelled fields rather than a positional CSV, so a code written by a different version still imports as much of itself as this one understands: unknown fields are ignored and missing ones fall back to the default.
+
+| Field | |
+| --- | --- |
+| `APLA1` | The format version |
+| `n` | Name |
+| `a` | Announce to chat, 0 or 1 |
+| `c` | Channel cap, 1 say to 4 yell |
+| `q` | Announce threshold, 0 to 5 |
+| `pe` | Pepe mode |
+| `t`, `tq` | Drop tracking, and its threshold |
+| `la` | At login: `off`, `on` or `ask` |
+| `bop`, `boe`, `bes` | The three roll grids, one letter per quality from uncommon up: `w`indow, `p`ass, `g`reed, `n`eed |
+| `p` | Chat prefix |
+
+Anything but a letter, digit or `-_.` in a name or a prefix is percent-escaped, so a code is always one whitespace-free token that survives any copy and paste. That is why `Drop:` reads as `Drop%3A` above.
 
 ### Roll actions
 
@@ -135,6 +196,13 @@ this one and nothing breaks without it.
 | --- | --- |
 | `/apla` | Open the options panel (`/lap` also works) |
 | `/apla pass` | Arm or disarm automated rolling |
+| `/apla preset` | List the presets |
+| `/apla preset <name or number>` | Switch to one |
+| `/apla preset new <name>` | New preset, copied from the current settings |
+| `/apla preset rename <name>` | Rename the one you are on |
+| `/apla preset delete <name or number>` | Delete one |
+| `/apla preset code` | Open the share-code window |
+| `/apla preset import <code>` | Import a code as a new preset |
 | `/apla set <bop\|boe\|stack\|all> <2-5> <window\|pass\|greed\|need>` | Set the action for one quality and kind |
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |

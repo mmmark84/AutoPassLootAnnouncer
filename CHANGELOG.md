@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.6.0] - 2026-09-07
+
+### Added
+- Presets. The dropdown at the top of the options panel switches between whole
+  sets of settings, so the night's raid rules and the way you loot a five-man
+  are two clicks apart instead of a dozen. Everything that decides what gets
+  announced and what gets rolled is in a preset: announce on or off, the
+  quality threshold, the channel cap, the chat prefix, pepe mode, the At login
+  setting, drop tracking and its own threshold, and all three roll grids.
+- A first run under this version makes one preset called "Preset 1" out of
+  whatever you already had and changes nothing else, so there is nothing to set
+  up and nothing to lose. Rename it and fork the next one off it with
+  "New from current" when you want a second.
+- There is no Save button, and deliberately so: the live settings *are* the
+  active preset, so a change you make is already in it. Switching away files
+  the one you are leaving and brings the other one in.
+- Where the windows sit, whether the minimap button is shown, the drop log and
+  the debug flag are all outside presets. They belong to the account rather
+  than to a role you switch into, and a preset that moved your minimap button
+  would be moving the control you switch presets with.
+- Share codes. "Share code..." in the preset menu puts the whole active preset
+  on one line you can paste into chat, and pastes one back in as a new preset
+  alongside the ones you already have rather than over them. Labelled fields
+  rather than a positional CSV, so a code from another version still imports as
+  much of itself as this one understands: unknown fields are ignored and missing
+  ones fall back to the default. The README carries a Raider and a Looter code
+  to start from.
+- `/apla preset` lists them, `/apla preset <name or number>` switches,
+  and new, rename, delete, code and import do what they say. A code pasted
+  straight after `/apla preset` is recognised as one.
+- The minimap tooltip names the preset you are on.
+
 ## [1.5.1] - 2026-09-06
 
 ### Fixed

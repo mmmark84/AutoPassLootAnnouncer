@@ -22,6 +22,7 @@ globals = {
     "AutoPassLootAnnouncerMinimapButton",
     "AutoPassLootAnnouncerPanel",
     "AutoPassLootAnnouncerTracker",
+    "AutoPassLootAnnouncerPresetCode",
     "SlashCmdList",       -- the addon writes its handler into this table
     "StaticPopupDialogs", -- and its login prompt into this one
 }
@@ -39,4 +40,8 @@ read_globals = {
     "RegisterAddonMessagePrefix", "RollOnLoot", "SendAddonMessage",
     "SendChatMessage", "StaticPopup_Show", "UIParent", "UISpecialFrames",
     "UnitGUID", "UnitName", "tinsert", "time", "wipe",
+    "ChatFontNormal", "CloseDropDownMenus", "UIDropDownMenu_AddButton",
+    "UIDropDownMenu_CreateInfo", "UIDropDownMenu_Initialize",
+    "UIDropDownMenu_JustifyText", "UIDropDownMenu_SetText",
+    "UIDropDownMenu_SetWidth",
 }
