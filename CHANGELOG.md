@@ -77,6 +77,17 @@
   five-man preset at 8 seconds.
 
 ### Fixed
+- The loot window updates a row the moment it gains a winner, instead of
+  sitting on "nobody" until some later drop happened to redraw it. A row is
+  created winner-less when the roll starts and filled in when the loot message
+  arrives, and that fill left `LogDrop` through an early return that only
+  redrew the log window -- which had been the only window there was when it was
+  written. A stack growing left through the other early return with the same
+  result. There is one way to say the log changed now, and all three exits use
+  it.
+- Turning on "Track drops" from the options panel redraws the loot window too,
+  so its "turn on Track drops" line goes away rather than waiting for the next
+  drop.
 - The loot window no longer covers your bags. It was on the HIGH frame strata,
   which is where the bag frames live, and it is a window that is always up, so
   it must never be the thing in front. It sits on LOW now: everything in the

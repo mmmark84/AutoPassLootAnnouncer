@@ -974,6 +974,16 @@ local function ItemID(link)
     return link and tonumber(link:match("item:(%d+)"))
 end
 
+-- Two windows read the drop log, and LogDrop has three ways out. Both of those
+-- facts arrived after the first one was written, and the result was that a row
+-- gaining its winner redrew the log window and not the loot window: the loot
+-- window sat on "nobody" until some later drop happened to leave through the
+-- bottom of the function. So there is one way to say the log changed.
+local function LootChanged()
+    RefreshTracker()
+    RefreshRollWindow()
+end
+
 -- winner nil means "this dropped, nobody has won it yet"
 function LogDrop(link, count, winner)
     if not db.track or not link then return end
@@ -999,7 +1009,7 @@ function LogDrop(link, count, winner)
                 -- winner and that name is already on it.
                 e.by = e.by or {}
                 e.by[winner] = (e.by[winner] or 0) + count
-                RefreshTracker()
+                LootChanged()
                 return
             end
         end
@@ -1012,7 +1022,7 @@ function LogDrop(link, count, winner)
             if e.id == id and not e.stack and not e.winner
                 and (time() - e.t) <= LOOT_MATCH_WINDOW then
                 e.winner = winner
-                RefreshTracker()
+                LootChanged()
                 return
             end
         end
@@ -1025,8 +1035,7 @@ function LogDrop(link, count, winner)
     db.loot.started = db.loot.started or time()
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
     Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
-    RefreshTracker()
-    RefreshRollWindow()   -- a new line for the loot window, if it is open
+    LootChanged()
 end
 
 function LogMoney(copper)
@@ -1038,8 +1047,7 @@ end
 
 function ClearLog()
     db.loot = { entries = {}, money = 0, started = time() }
-    RefreshTracker()
-    RefreshRollWindow()   -- the loot window reads the same log
+    LootChanged()
     print("|cff66ccffAPLA|r drop log cleared, new session started")
 end
 
@@ -1877,7 +1885,7 @@ local function BuildPanel()
     panel.track = MakeCheck(body, "APLACheckTrack", "Track drops", 16, -474,
         "Keeps a list of what dropped this session and who won it. Middle-click the minimap "
             .. "button to open it. The list is kept between logins until you clear it.",
-        function(v) db.track = v; RefreshTracker() end)
+        function(v) db.track = v; LootChanged() end)
 
     -- On the bottom bar rather than a row of its own: the panel is already as
     -- tall as some people's screens, and this is a cycle button like At login
