@@ -191,6 +191,7 @@ Right-clicking anywhere on it — header, body or a row — opens a short menu:
 | --- | --- |
 | Track drops | Toggle the log the list reads from. It is here because it is the one thing that can leave the window empty |
 | Show | The quality threshold, as the qualities themselves: **Everything**, **Uncommon and better**, and so on up to **Legendary only**, each in its own colour with a tick on the one in force |
+| Clear the drop log | Empties the log and starts a new session, here and in the log window. Asks first, unless there is nothing to lose |
 | Close this window | Same as the X |
 
 The threshold is the **same setting** as the slider at the bottom of the drop log — one threshold, two places to reach it, so changing it in either place moves both. Offering the qualities by name and colour rather than as a slider position means you pick the thing you want by looking at it instead of translating a position into a quality.
@@ -221,7 +222,7 @@ Group loot rolls only happen in a group, on Group Loot or Need Before Greed — 
 
 Off by default. Turn it on with **Track drops** in the options, then **middle-click the minimap button** to open the log.
 
-A session lasts as long as you leave it. The log is saved between logins and emptied only by the **Clear** button, so a night of trash runs with a logout in the middle is still one list.
+A session lasts as long as you leave it. The log is saved between logins and emptied only when you say so — the **Clear** button here, or **Clear the drop log** in the loot window's right-click menu — so a night of trash runs with a logout in the middle is still one list. Either way it asks first, unless the log is already empty.
 
 Two tabs: **Everything**, and **Mine** for what the character you are on took. Mine is per character, not per account — a winner's name is the only thing that says whose a drop was, and the log is shared between your characters.
 

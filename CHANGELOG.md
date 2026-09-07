@@ -28,7 +28,14 @@
   force, so you pick the thing you want by looking at it. It is the same
   setting as the slider in the drop log, so the two follow each other.
 - "Track drops" is in that menu too, because it is the one thing that can leave
-  the window empty, and the empty window tells you to turn it on.
+  the window empty, and the empty window tells you to turn it on. So is
+  "Clear the drop log", for starting a fresh session without going and finding
+  the log window.
+- Clearing now asks first, from either place. It is one button in the log
+  window, which you opened deliberately, but it is also an entry in a menu you
+  open to change a quality filter, and a slip there should not cost a night of
+  drops. An already-empty log is cleared without the prompt, since there is
+  nothing to lose.
 - "Drops only" works with no grace period at all, and works solo, which is the
   half that answers "show me what I looted". The list is the drop log's newest
   rows rather than a second list, so the log's own threshold filters it and

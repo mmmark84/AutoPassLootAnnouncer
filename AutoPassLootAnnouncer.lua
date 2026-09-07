@@ -1039,7 +1039,32 @@ end
 function ClearLog()
     db.loot = { entries = {}, money = 0, started = time() }
     RefreshTracker()
+    RefreshRollWindow()   -- the loot window reads the same log
     print("|cff66ccffAPLA|r drop log cleared, new session started")
+end
+
+-- A night of drops, and nothing that brings them back. It is one button in the
+-- log window, where you went deliberately, but it is also an entry in a menu
+-- you open to change a quality filter, and a slip there should not cost the
+-- night. So both go through here.
+StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_CLEAR_LOG"] = {
+    text = "Empty the drop log?\n\nEverything recorded this session goes, here and in "
+        .. "the loot window, and a new session starts.",
+    button1 = "Clear it",
+    button2 = "Cancel",
+    OnAccept = function() ClearLog() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,   -- the low indices are the ones that pick up taint
+}
+
+local function ConfirmClearLog()
+    if #db.loot.entries == 0 and (db.loot.money or 0) == 0 then
+        ClearLog()   -- nothing to lose, so do not ask
+        return
+    end
+    StaticPopup_Show("AUTOPASSLOOTANNOUNCER_CLEAR_LOG")
 end
 
 ----------------------------------------------------------------
@@ -2135,8 +2160,8 @@ local function BuildTracker()
     clear:SetSize(90, 22)
     clear:SetPoint("BOTTOMRIGHT", -26, 12)   -- clear of the resize grip
     clear:SetText("Clear")
-    clear.tooltipText = "Empties the log and starts a new session."
-    clear:SetScript("OnClick", function() ClearLog() end)
+    clear.tooltipText = "Empties the log and starts a new session. Asks first."
+    clear:SetScript("OnClick", function() ConfirmClearLog() end)
 
     local grip = CreateFrame("Button", nil, tracker)
     grip:SetSize(16, 16)
@@ -2526,6 +2551,16 @@ local function RollMenuInit(_, level)
     end
 
     Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
+    Add({
+        -- named for the log rather than for this window, because that is what
+        -- it empties: the drop log both this and the log window read
+        text = "Clear the drop log",
+        notCheckable = true,
+        func = function()
+            CloseDropDownMenus()
+            ConfirmClearLog()
+        end,
+    })
     Add({
         text = "Close this window",
         notCheckable = true,
