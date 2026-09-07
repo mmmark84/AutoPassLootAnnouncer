@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - loot window (branch: feature/roll-grace-window)
+## [1.7.0] - 2026-09-07
 
 ### Added
 - An optional loot window: what dropped, as it drops, and optionally a grace
