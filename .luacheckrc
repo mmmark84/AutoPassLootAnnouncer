@@ -23,6 +23,7 @@ globals = {
     "AutoPassLootAnnouncerPanel",
     "AutoPassLootAnnouncerTracker",
     "AutoPassLootAnnouncerPresetCode",
+    "AutoPassLootAnnouncerArmPrompt",
     "SlashCmdList",       -- the addon writes its handler into this table
     "StaticPopupDialogs", -- and its login prompt into this one
 }

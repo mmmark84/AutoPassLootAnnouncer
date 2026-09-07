@@ -28,7 +28,10 @@ local defaults = {
     -- `defaults` would be shared by reference.
     prefix       = "Drop:",
     pepe         = false,  -- prepend a random happy pepe to every announce
-    loginArm     = "off",  -- what automated rolling does at login: off / on / ask
+    loginArm     = "off",  -- what automated rolling does at login: off / on / ask.
+                           -- Account-wide, not per preset: it is a question about
+                           -- this session rather than about a role, and when it is
+                           -- "ask" the prompt is where you pick the preset anyway.
     track        = false,  -- keep a log of what dropped; off until you ask for it
     trackMin     = 2,      -- log uncommon and better
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
@@ -47,7 +50,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe", "loginArm",
+    "announce", "channel", "minQuality", "prefix", "pepe",
     "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -321,6 +324,12 @@ local function EnsurePresets()
         db.activePreset = 1
     end
 
+    -- "At login" used to be part of a preset. It is an account setting now, so
+    -- the copy each one is carrying is dead weight: the live value at the root
+    -- is the one that counts, and it is already whatever the preset you were
+    -- last on had set.
+    for _, p in ipairs(db.presets) do p.values.loginArm = nil end
+
     db.activePreset = tonumber(db.activePreset) or 1
     if not db.presets[db.activePreset] then db.activePreset = 1 end
 end
@@ -485,7 +494,6 @@ local function EncodePreset(name, v)
         ("pe=%d"):format(v.pepe and 1 or 0),
         ("t=%d"):format(v.track and 1 or 0),
         ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
-        ("la=%s"):format(LOGIN_ARM_LABEL[v.loginArm or ""] and v.loginArm or defaults.loginArm),
         ("bop=%s"):format(EncodeActions(v.actionsBoP)),
         ("boe=%s"):format(EncodeActions(v.actionsBoE)),
         ("bes=%s"):format(EncodeActions(v.actionsBoEStack)),
@@ -531,7 +539,6 @@ local function DecodePreset(code)
         pepe       = flag("pe", defaults.pepe),
         track      = flag("t", defaults.track),
         trackMin   = num("tq", 0, 5, defaults.trackMin),
-        loginArm   = LOGIN_ARM_LABEL[f.la or ""] and f.la or defaults.loginArm,
         prefix     = f.p and Unesc(f.p) or defaults.prefix,
         actionsBoP      = DecodeActions(f.bop or ""),
         actionsBoE      = DecodeActions(f.boe or ""),
@@ -1007,22 +1014,113 @@ local function ChannelSummary()
     return "|cff00ff00" .. ch:lower() .. "|r (up to " .. cap .. ")"
 end
 
-StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_ARM"] = {
-    text = "Auto Pass Loot Announcer\n\nArm automated rolling for this session?\n"
-        .. "While armed it answers loot rolls for you, by quality and bind type.",
-    button1 = "Arm it",
-    button2 = "Leave it off",
-    OnAccept = function()
+----------------------------------------------------------------
+-- Login prompt
+----------------------------------------------------------------
+-- What "At login: ask" puts in front of you. A frame of its own rather than a
+-- StaticPopup because it carries a preset dropdown, and a StaticPopup is one
+-- shared, recycled frame with a fixed set of widgets in it.
+--
+-- Arming and which preset to arm are the same question at login -- you are not
+-- picking a role in the abstract, you are deciding how tonight is going to go --
+-- so they are asked together, and the preset you were last on is the one
+-- already selected.
+local armPrompt
+
+-- Just the presets. The settings panel's menu carries new/rename/delete/share
+-- as well, which is housekeeping and has no business in a prompt.
+local function ArmPresetMenu(_, level)
+    level = level or 1
+    if level ~= 1 then return end
+    for i, p in ipairs(db.presets) do
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = p.name
+        info.checked = (i == db.activePreset)
+        info.func = function()
+            -- Applied there and then rather than held until "Arm it". Picking a
+            -- preset and picking whether to arm are two answers, and you are
+            -- allowed to change one without the other.
+            SelectPreset(i)
+            UIDropDownMenu_SetText(armPrompt.dd, ActivePresetName())
+            CloseDropDownMenus()
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+end
+
+local function BuildArmPrompt()
+    armPrompt = CreateFrame("Frame", "AutoPassLootAnnouncerArmPrompt", UIParent,
+        "BasicFrameTemplateWithInset")
+    armPrompt:SetSize(400, 200)
+    armPrompt:SetPoint("CENTER", 0, 120)   -- clear of the middle of the screen
+    armPrompt:SetMovable(true)
+    armPrompt:EnableMouse(true)
+    armPrompt:RegisterForDrag("LeftButton")
+    armPrompt:SetScript("OnDragStart", armPrompt.StartMoving)
+    armPrompt:SetScript("OnDragStop", armPrompt.StopMovingOrSizing)
+    armPrompt:SetClampedToScreen(true)
+    armPrompt:SetFrameStrata("DIALOG")   -- the same strata as the rest, see the panel
+    armPrompt:SetToplevel(true)
+    armPrompt:Hide()
+    -- Escape closes it, which means "leave it off": the prompt exists so that
+    -- arming is never something that happened without you saying so.
+    tinsert(UISpecialFrames, "AutoPassLootAnnouncerArmPrompt")
+
+    local title = armPrompt:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", 0, -6)
+    title:SetText("Auto Pass Loot Announcer")
+
+    local msg = armPrompt:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    msg:SetPoint("TOPLEFT", 20, -38)
+    msg:SetPoint("TOPRIGHT", -20, -38)
+    msg:SetJustifyH("CENTER")
+    msg:SetText("Arm automated rolling for this session?\n\n"
+        .. "While armed it answers loot rolls for you, by quality and bind type.")
+
+    -- The row and the buttons are anchored up from the bottom edge, so however
+    -- many lines the message above wraps to, nothing below it moves.
+    local label = armPrompt:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    label:SetPoint("BOTTOMLEFT", 24, 52)
+    label:SetText("Preset")
+
+    armPrompt.dd = CreateFrame("Frame", "APLAArmPresetDropDown", armPrompt,
+        "UIDropDownMenuTemplate")
+    armPrompt.dd:SetPoint("BOTTOMLEFT", 56, 44)
+    UIDropDownMenu_SetWidth(armPrompt.dd, 260)
+    UIDropDownMenu_Initialize(armPrompt.dd, ArmPresetMenu)
+    if UIDropDownMenu_JustifyText then UIDropDownMenu_JustifyText(armPrompt.dd, "LEFT") end
+
+    local arm = CreateFrame("Button", nil, armPrompt, "UIPanelButtonTemplate")
+    arm:SetSize(150, 24)
+    arm:SetPoint("BOTTOMLEFT", 24, 14)
+    arm:SetText("Arm it")
+    arm:SetScript("OnClick", function()
+        armPrompt:Hide()
         db.autopass = true
         UpdateButtonLook()
-        print("|cff66ccffAPLA|r auto-roll |cff00ff00armed|r")
+        print(("|cff66ccffAPLA|r auto-roll |cff00ff00armed|r on |cffffd100%s|r")
+            :format(ActivePresetName()))
         if panel and panel:IsShown() then RefreshPanel() end
-    end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,   -- the low indices are the ones that pick up taint
-}
+    end)
+
+    local leave = CreateFrame("Button", nil, armPrompt, "UIPanelButtonTemplate")
+    leave:SetSize(150, 24)
+    leave:SetPoint("BOTTOMRIGHT", -24, 14)
+    leave:SetText("Leave it off")
+    leave:SetScript("OnClick", function() armPrompt:Hide() end)
+
+    -- Rebuilt on the way up rather than at build time: a preset can have been
+    -- renamed, added or deleted since the last time this was on screen.
+    armPrompt:SetScript("OnShow", function()
+        UIDropDownMenu_SetText(armPrompt.dd, ActivePresetName())
+    end)
+end
+
+local function ShowArmPrompt()
+    if not armPrompt then return end
+    armPrompt:Show()
+    armPrompt:Raise()
+end
 
 local function ButtonTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
@@ -2118,6 +2216,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         BuildButton()
         BuildPanel()
         BuildPresetCode()
+        BuildArmPrompt()
         BuildTracker()
         UpdateButtonLook()
 
@@ -2187,7 +2286,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if db.loginArm == "ask" then
             -- fired at PLAYER_LOGIN it lands behind the loading screen, so give
             -- the client a moment to finish getting out of the way
-            C_Timer.After(3, function() StaticPopup_Show("AUTOPASSLOOTANNOUNCER_ARM") end)
+            C_Timer.After(3, ShowArmPrompt)
         end
 
     elseif event == "START_LOOT_ROLL" then

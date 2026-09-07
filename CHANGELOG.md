@@ -7,8 +7,8 @@
   sets of settings, so the night's raid rules and the way you loot a five-man
   are two clicks apart instead of a dozen. Everything that decides what gets
   announced and what gets rolled is in a preset: announce on or off, the
-  quality threshold, the channel cap, the chat prefix, pepe mode, the At login
-  setting, drop tracking and its own threshold, and all three roll grids.
+  quality threshold, the channel cap, the chat prefix, pepe mode, drop tracking
+  and the log's quality filter, and all three roll grids.
 - A first run under this version makes one preset called "Preset 1" out of
   whatever you already had and changes nothing else, so there is nothing to set
   up and nothing to lose. Rename it and fork the next one off it with
@@ -16,10 +16,10 @@
 - There is no Save button, and deliberately so: the live settings *are* the
   active preset, so a change you make is already in it. Switching away files
   the one you are leaving and brings the other one in.
-- Where the windows sit, whether the minimap button is shown, the drop log and
-  the debug flag are all outside presets. They belong to the account rather
-  than to a role you switch into, and a preset that moved your minimap button
-  would be moving the control you switch presets with.
+- "At login", where the windows sit, whether the minimap button is shown, the
+  drop log and the debug flag are all outside presets. They belong to the
+  account rather than to a role you switch into, and a preset that moved your
+  minimap button would be moving the control you switch presets with.
 - Share codes. "Share code..." in the preset menu puts the whole active preset
   on one line you can paste into chat, and pastes one back in as a new preset
   alongside the ones you already have rather than over them. Labelled fields
@@ -33,6 +33,24 @@
 - The minimap tooltip names the preset you are on.
 
 ### Changed
+- "At login" is an account setting rather than part of a preset. It is a
+  question about this session, not about a role, and having it inside a preset
+  made the two questions fight: switching to your five-man preset quietly
+  changed whether tomorrow's login would prompt you. The value each preset was
+  carrying is dropped on upgrade; the live one, from whichever preset you were
+  last on, becomes the account setting.
+- On "Ask", the login prompt now picks the preset too, which is the question
+  you actually have at login: not whether to arm in the abstract but how
+  tonight is going to go. The dropdown opens on the preset you were last using.
+  Choosing one switches there and then, whether or not you go on to arm, so the
+  prompt is also a way to change preset and leave rolling off.
+- That prompt is a window of its own instead of a StaticPopup, which is a
+  shared recycled frame with a fixed set of widgets and no room for a dropdown.
+  "Leave it off" and Escape both still mean disarmed.
+- Share codes no longer carry an "At login" field, since it is no longer part
+  of a preset. Codes written by 1.6.0 before this change have an `la` field,
+  and it is ignored the same way any unknown field is -- which is what that
+  part of the format was for.
 - The slider at the bottom of the drop log now filters what is on screen
   instead of setting what gets logged, on both tabs. It sits under a list and
   reads as a filter, so it had better be one. With tracking on, everything that

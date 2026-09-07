@@ -30,8 +30,10 @@ Armed is never carried between sessions. What happens at login is the **At login
 | | |
 | --- | --- |
 | Off | Stays disarmed until you arm it yourself. The default |
-| On | Armed straight away |
+| On | Armed straight away, on the preset you were last using |
 | Ask | A prompt each login, so it is never armed without you saying so |
+
+**At login is an account setting, not part of a preset** — it is a question about this session rather than about a role, and on **Ask** the prompt is where you pick the role anyway. That prompt carries a preset dropdown, already set to the one you were last using: pick a different one and it switches there and then, whether or not you go on to arm. **Leave it off** and Escape both mean disarmed.
 
 | | |
 | --- | --- |
@@ -58,8 +60,8 @@ There is no Save button, deliberately. The live settings **are** the active pres
 
 | | |
 | --- | --- |
-| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the At login setting, drop tracking and the log's quality filter, and all three roll grids |
-| **Not in a preset** | Where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
+| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, drop tracking and the log's quality filter, and all three roll grids |
+| **Not in a preset** | **At login**, where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
 
@@ -69,21 +71,21 @@ The second list is the things that belong to the account rather than to a role y
 
 Two to start from, if you want somewhere to begin. Paste either into the code window, or after `/apla preset import`:
 
-**Raider** — pass on everything, but stop on a bind-on-equip that does not stack, because somebody may have been waiting weeks for it. Announce rare and better, up to raid. Prompts at login before arming.
+**Raider** — pass on everything, but stop on a bind-on-equip that does not stack, because somebody may have been waiting weeks for it. Announce rare and better, up to raid.
 
 ```
-APLA1:n=Raider,a=1,c=3,q=3,pe=0,t=0,tq=2,la=ask,bop=pppp,boe=pwww,bes=pppp,p=Drop%3A
+APLA1:n=Raider,a=1,c=3,q=3,pe=0,t=0,tq=2,bop=pppp,boe=pwww,bes=pppp,p=Drop%3A
 ```
 
 **Looter** — greed everything, decide epics and legendaries yourself. Announce uncommon and better, up to party, and log what dropped.
 
 ```
-APLA1:n=Looter,a=1,c=2,q=2,pe=0,t=1,tq=2,la=off,bop=ggww,boe=gggg,bes=gggg,p=Drop%3A
+APLA1:n=Looter,a=1,c=2,q=2,pe=0,t=1,tq=2,bop=ggww,boe=gggg,bes=gggg,p=Drop%3A
 ```
 
 A code pasted straight after `/apla preset`, with no keyword, is recognised as one.
 
-**The format** is labelled fields rather than a positional CSV, so a code written by a different version still imports as much of itself as this one understands: unknown fields are ignored and missing ones fall back to the default.
+**The format** is labelled fields rather than a positional CSV, so a code written by a different version still imports as much of itself as this one understands: unknown fields are ignored and missing ones fall back to the default. A code written before **At login** left the presets carries an `la` field, which is one of the fields now ignored.
 
 | Field | |
 | --- | --- |
@@ -94,7 +96,6 @@ A code pasted straight after `/apla preset`, with no keyword, is recognised as o
 | `q` | Announce threshold, 0 to 5 |
 | `pe` | Pepe mode |
 | `t`, `tq` | Drop tracking, and its threshold |
-| `la` | At login: `off`, `on` or `ask` |
 | `bop`, `boe`, `bes` | The three roll grids, one letter per quality from uncommon up: `w`indow, `p`ass, `g`reed, `n`eed |
 | `p` | Chat prefix |
 
