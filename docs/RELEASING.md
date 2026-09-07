@@ -52,7 +52,7 @@ addon is developed against:
 | --- | --- |
 | Client folder | `_anniversary_` |
 | `.flavor.info` | `wow_anniversary` |
-| `## Interface` in the toc | `20505` (2.5.5, Burning Crusade) |
+| `## Interface` in the toc | `20506` (2.5.6, Burning Crusade) |
 | Toc suffix other addons ship for it | `_TBC.toc` |
 
 So the Anniversary realms currently run a Burning Crusade build, and `bcc` is

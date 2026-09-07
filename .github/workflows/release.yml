@@ -26,6 +26,6 @@ jobs:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
         with:
           # -g sets the game flavour: bcc matches the Anniversary client
-          # (wow_anniversary, Interface 20505). See docs/RELEASING.md.
+          # (wow_anniversary, Interface 20506). See docs/RELEASING.md.
           # Add -d to build a zip without uploading anywhere.
           args: -g bcc

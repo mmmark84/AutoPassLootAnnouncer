@@ -1,4 +1,4 @@
-## Interface: 20505
+## Interface: 20506
 ## Title: Auto Pass Loot Announcer
 ## Notes: Announces group loot drops the moment they drop, and rolls need/greed/pass for you by item quality.
 ## Author: Bikkie
