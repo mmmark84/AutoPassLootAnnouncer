@@ -2336,8 +2336,8 @@ local function RecentEntries()
     for i = #all, 1, -1 do
         if #out >= MAX_ROLL_RECENT then break end
         local e = all[i]
-        local pending = waiting[e.id] and not e.winner and not e.stack
-        if not pending and EntryQuality(e) >= (db.trackMin or 0) then
+        local stillRolling = waiting[e.id] and not e.winner and not e.stack
+        if not stillRolling and EntryQuality(e) >= (db.trackMin or 0) then
             out[#out + 1] = e
         end
     end
@@ -2647,8 +2647,8 @@ local function BuildRollWindow()
     rollWin:RegisterForDrag("LeftButton")
     rollWin:SetScript("OnDragStart", rollWin.StartMoving)
     rollWin:SetScript("OnDragStop", SavePos)
-    rollWin:SetScript("OnMouseUp", function(_, button)
-        if button == "RightButton" then ShowRollMenu() end
+    rollWin:SetScript("OnMouseUp", function(_, mouseButton)
+        if mouseButton == "RightButton" then ShowRollMenu() end
     end)
 
     if db.rollPos then
@@ -2676,8 +2676,8 @@ local function BuildRollWindow()
     head:RegisterForDrag("LeftButton")
     head:SetScript("OnDragStart", function() rollWin:StartMoving() end)
     head:SetScript("OnDragStop", function() SavePos(rollWin) end)
-    head:SetScript("OnMouseUp", function(_, button)
-        if button == "RightButton" then ShowRollMenu() end
+    head:SetScript("OnMouseUp", function(_, mouseButton)
+        if mouseButton == "RightButton" then ShowRollMenu() end
     end)
 
     local headBg = head:CreateTexture(nil, "ARTWORK")
@@ -2753,8 +2753,8 @@ local function BuildRollWindow()
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row:SetScript("OnClick", function(self, button)
-            if button == "RightButton" then ShowRollMenu()
+        row:SetScript("OnClick", function(self, mouseButton)
+            if mouseButton == "RightButton" then ShowRollMenu()
             elseif self.rollID then ClaimRoll(self.rollID) end
         end)
 
@@ -2786,8 +2786,8 @@ local function BuildRollWindow()
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row:SetScript("OnClick", function(self, button)
-            if button == "RightButton" then ShowRollMenu()
+        row:SetScript("OnClick", function(self, mouseButton)
+            if mouseButton == "RightButton" then ShowRollMenu()
             elseif self.link then HandleModifiedItemClick(self.link) end
         end)
 
