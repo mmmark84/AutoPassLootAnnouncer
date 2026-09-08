@@ -637,7 +637,9 @@ local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
 -- limit of 200 locals, so it is one name rather than a dozen. Filled in down in
 -- its own section.
 local pop = {
-    W        = 300,   -- it lists, it is not read across
+    W        = 300,   -- the default; db.popupW once it has been dragged
+    MIN_W    = 180,
+    MAX_W    = 600,
     ROW_H    = 18,
     PAD      = 5,
     MAX_ROWS = 10,    -- a pack, not a night
@@ -816,7 +818,7 @@ local function ProcessRoll(rollID, tries)
         Queue(link)
     end
 
-    LogDrop(link)
+    LogDrop(link, nil, nil, true)
 
     if not db.autopass then
         Dbg("not armed, leaving roll %d alone", rollID)
@@ -957,22 +959,37 @@ end
 -- emptied only by the Clear button, so a night of trash runs with a logout in
 -- the middle is still one list.
 --
--- Rows come from CHAT_MSG_LOOT, which is the only thing that carries a winner's
--- name or says how many of something changed hands. START_LOOT_ROLL adds a row
--- too, but only for items that do not stack: it fires before anyone has won, so
--- the row waits with no winner until a loot message fills it in, and a row that
--- is never filled in is a drop nobody took. Stackables are left to the loot
--- message alone, because counting them from both events would count them twice.
--- Tracking takes everything, and the slider in the log window filters what you
--- are looking at rather than what gets kept. It reads as a filter, so it had
--- better be one; and a threshold on the way in throws away rows you cannot ask
--- for later, where a filter on the way out can always be widened.
+-- What the log is: the drops that were put to the group. An item the server
+-- rolled for -- the window you would have answered without this addon -- and,
+-- under master loot, one a loot addon announced. Nothing else.
 --
--- The room is because of that: with greys and quest items now landing in the
--- log too, 500 rows was a couple of hours of trash before the epics started
--- falling off the far end.
+-- It used to be anything that said "receives loot", and that line cannot tell a
+-- drop from a disenchant. A run of Stockades came back with Soul Dust and
+-- Lesser Astral Essence listed as loot, because they are: someone shredded the
+-- greens they had just won. Vashj was worse -- six lines of Vashj's Vial
+-- Remnant and four of Tainted Core, which are fight mechanics that arrive
+-- through the loot system. None of it was ever offered to anyone, and it buried
+-- the drops that were.
+--
+-- So START_LOOT_ROLL is what makes an item loggable, and the loot message only
+-- says who ended up with it. That is also what separates the two: the roll
+-- fires before anyone has won, so a non-stacking item gets its row there and
+-- waits for a name -- one that never gets a name is a drop nobody took --
+-- while a stackable waits for the message, which is the only thing that says
+-- how many. Counting a stackable from both would count it twice.
+--
+-- The quality slider still filters the view rather than what is kept: a
+-- threshold on the way in throws away rows you cannot ask for later, where a
+-- filter on the way out can always be widened.
 local MAX_LOOT_ROWS     = 1000
 local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
+-- How long an item stays loggable after the server offered it. Longer than a
+-- roll's two minutes, because the loot message comes when the corpse is looted
+-- rather than when the roll ends, and generous is safe here: a disenchant, a
+-- quest pickup or a fight's own hand-outs are different items entirely, so a
+-- stale entry cannot let one of those through.
+local ROLL_MEMORY       = 600
+local rolled = {}   -- [itemID] = when the server last put it up for a roll
 -- A master-looted item waits on the loot master rather than on a ten-second
 -- roll, and that can be most of a boss fight later, so an announced row is
 -- given the rest of the raid to find its name.
@@ -1049,8 +1066,10 @@ local function LootChanged(entry)
     pop.wake(entry)
 end
 
--- winner nil means "this dropped, nobody has won it yet"
-function LogDrop(link, count, winner)
+-- winner nil means "this dropped, nobody has won it yet". `offered` is
+-- ProcessRoll saying the server has just put this item up for a roll, which is
+-- the one moment anything can be sure it is a drop rather than a disenchant.
+function LogDrop(link, count, winner, offered)
     if not db.track or not link then return end
 
     -- Recorded on the row rather than asked of the item later: the log outlives
@@ -1061,6 +1080,29 @@ function LogDrop(link, count, winner)
     if not id then return end
 
     local entries = db.loot.entries
+
+    if offered then
+        rolled[id] = time()
+    else
+        -- Not from a roll, so it has to be something already accounted for: an
+        -- item the server offered a moment ago, or a master-looted one that an
+        -- addon announced and which is still waiting to be handed over.
+        local known = rolled[id] and (time() - rolled[id]) <= ROLL_MEMORY
+        if not known then
+            for _, e in ipairs(entries) do
+                if e.id == id and e.announced and not e.winner
+                    and (time() - e.t) <= ANNOUNCED_MATCH_WINDOW then
+                    known = true
+                    break
+                end
+            end
+        end
+        if not known then
+            Dbg("nobody was offered %s, so it is not a drop", tostring(link))
+            return
+        end
+    end
+
     -- a count above one settles it; otherwise ask the item itself
     local stacks = (count and count > 1) or IsStackable(link) == true
 
@@ -2103,7 +2145,10 @@ local function BuildPanel()
     panel.popup:SetScript("OnClick", function()
         db.popup = pop.next(db.popup)
         RefreshPanel()
-        if not pop.on() then pop.gone() end
+        -- Show it while you are setting it, because a window that only appears
+        -- when something drops is one you can never find to put anywhere. It
+        -- fades on its own like any other showing.
+        if pop.on() then pop.preview() else pop.gone() end
     end)
     AttachTooltip(panel.popup, "Drop popup", {
         "A small window that appears when something drops, says what it was, and goes again. "
@@ -3175,13 +3220,10 @@ function pop.build()
     f:SetFrameStrata("LOW")   -- for the reason the loot window is there
     f:Hide()
 
+    f:SetResizable(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, rel, x, y = self:GetPoint()
-        db.popupPos = { point = point, rel = rel, x = x, y = y }
-    end)
+    f:SetScript("OnDragStop", function() pop.savePos() end)
     -- Right-click puts it away now rather than in a few seconds. There is no
     -- menu on it: it is not up long enough to be configured from, and what you
     -- would set is on the loot window's menu and the settings panel.
@@ -3207,8 +3249,13 @@ function pop.build()
     for i = 1, pop.MAX_ROWS do
         local row = MakeRollRow(f, pop.ROW_H)
         row:SetPoint("TOPLEFT", pop.PAD, -(pop.PAD + (i - 1) * pop.ROW_H))
-        row:SetWidth(pop.W - pop.PAD * 2)
-        row.text:SetWidth(pop.W - pop.PAD * 2 - pop.ROW_H - 95)
+
+        -- The rows cover nearly all of it, and a button swallows what it is not
+        -- told to pass on, so each one hands its drag to the window. Without
+        -- this there is nowhere to grab: it has no header to spare the room for.
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function() f:StartMoving() end)
+        row:SetScript("OnDragStop", function() pop.savePos() end)
 
         row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.who:SetPoint("RIGHT", -2, 0)
@@ -3234,7 +3281,55 @@ function pop.build()
         pop.rows[i] = row
     end
 
+    -- Width only. Height is however many rows it is holding, so the bounds are
+    -- pinned to the height it has at the moment you grab the corner and it does
+    -- not stretch under the cursor and snap back on the next drop.
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -2, 2)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function()
+        local h = f:GetHeight()
+        if f.SetResizeBounds then
+            f:SetResizeBounds(pop.MIN_W, h, pop.MAX_W, h)
+        else
+            f:SetMinResize(pop.MIN_W, h)
+            f:SetMaxResize(pop.MAX_W, h)
+        end
+        f:StartSizing("BOTTOMRIGHT")
+    end)
+    grip:SetScript("OnMouseUp", function()
+        f:StopMovingOrSizing()
+        db.popupW = math.floor(f:GetWidth() + 0.5)
+        pop.layout()
+    end)
+
     pop.frame = f
+    pop.layout()
+end
+
+function pop.savePos()
+    local f = pop.frame
+    if not f then return end
+    f:StopMovingOrSizing()
+    local point, _, rel, x, y = f:GetPoint()
+    db.popupPos = { point = point, rel = rel, x = x, y = y }
+end
+
+-- Rows are as wide as the window, and the item name gets whatever the icon and
+-- the winner column leave it.
+function pop.layout()
+    local f = pop.frame
+    if not f then return end
+
+    local w = math.max(pop.MIN_W, math.min(pop.MAX_W, tonumber(db.popupW) or pop.W))
+    f:SetWidth(w)
+    for _, row in ipairs(pop.rows) do
+        row:SetWidth(w - pop.PAD * 2)
+        row.text:SetWidth(w - pop.PAD * 2 - pop.ROW_H - 95)
+    end
 end
 
 function pop.refresh()
@@ -3244,8 +3339,10 @@ function pop.refresh()
     for i, row in ipairs(pop.rows) do
         local e = list[i]
         if e then
-            row.link, row.res = e.link, e.res
-            row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
+            -- the placeholder has no item behind it, so it gets no link either
+            row.link, row.res = (not e.sample) and e.link or nil, e.res
+            row.icon:SetTexture(not e.sample
+                and (select(10, GetItemInfo(e.link)) or UNKNOWN_ICON) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
             if not e.winner and not e.stack and e.res then
@@ -3317,16 +3414,37 @@ function pop.tick()
     end
 end
 
+-- What the panel shows you while you are choosing where it lives. A real
+-- showing in every respect, so what you are aiming at is the thing itself.
+function pop.preview()
+    if not pop.on() then return end
+    if not pop.frame then pop.build() end
+    -- Not a real item link: nothing should be able to open a tooltip on it or
+    -- paste it into chat, so the row is marked and drawn as plain text.
+    pop.sample = pop.sample or {
+        link = "|cff1eff00[Drag me anywhere]|r", count = 1, q = 5,
+        winner = "corner resizes", sample = true,
+    }
+    local held = false
+    for _, e in ipairs(pop.burst) do if e == pop.sample then held = true end end
+    if not held then pop.burst[#pop.burst + 1] = pop.sample end
+    pop.wake(pop.sample, true)
+end
+
 -- `entry` is the log row that just changed; nil means "show what you are
 -- holding", which is what leaving combat asks for.
-function pop.wake(entry)
-    if not pop.on() or not db.track then return end
+-- `force` is the panel showing you where the window lives: it answers to
+-- nothing, not the threshold and not whether the log is even on, because you
+-- are aiming at it rather than reading it.
+function pop.wake(entry, force)
+    if not pop.on() then return end
+    if not force and not db.track then return end
 
     if entry then
         -- The same threshold the windows filter on, so a trash pull does not
         -- keep putting a popup on screen while the epics still do.
         local q = entry.q or QualityOf(entry.link) or 0
-        if q < (db.trackMin or 0) then return end
+        if not force and q < (db.trackMin or 0) then return end
 
         local seen = false
         for _, e in ipairs(pop.burst) do
@@ -3720,7 +3838,7 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
                 db.popup = pop.on() and 0 or 5
             end
             print("|cff66ccffAPLA|r drop popup: " .. pop.label(db.popup))
-            if not pop.on() then pop.gone() end
+            if pop.on() then pop.preview() else pop.gone() end
             if panel and panel:IsShown() then RefreshPanel() end
         end
     elseif cmd == "grace" then

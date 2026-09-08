@@ -29,6 +29,27 @@
   leave it off.
 
 ### Changed
+- The log only takes what the group was actually offered: an item the server
+  rolled for, or a master-looted one a loot addon announced. It used to take
+  anything that said "receives loot", and that line cannot tell a drop from
+  anything else the loot system delivers. A Stockades run came back listing Soul
+  Dust and Lesser Astral Essence, because someone had shredded the greens they
+  won; Vashj came back with six lines of Vashj's Vial Remnant and four of
+  Tainted Core, which are fight mechanics. None of it was ever offered to
+  anyone, and it buried the drops that were.
+- Greys and commons in a group are handed out round-robin without a roll, so
+  they no longer appear either -- the same rule, and most of what made the list
+  long.
+- Solo, nothing is ever rolled for, so nothing is logged. The log is a record of
+  what the group was offered rather than of what you picked up. Your share of
+  the money is still counted; that has nothing to do with rolls.
+- An item stays loggable for ten minutes after it is offered, which covers the
+  roll's two minutes and the wait for somebody to loot the corpse.
+- The drop popup is dragged by its rows as well as its body, since the rows
+  cover nearly all of it, and the grip in its corner sets the width. Cycling the
+  Drop popup button shows it with a placeholder to aim at, because a window that
+  only appears when something drops is otherwise one you can never find to put
+  anywhere.
 - `/apla window` opens and closes the loot window; `/apla roll` still does too.
   `/apla popup` now belongs to the popup, which has the better claim on the
   name.

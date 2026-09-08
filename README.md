@@ -255,7 +255,13 @@ This is the opposite. It appears when something drops, says what it was, and goe
 
 It has no grace period and no countdown because it has nothing you must answer. Taking a roll back is the loot window's job, and that window stays up precisely because it might need you. Run both if you want both.
 
-Drag to move it, right-click to put it away early, shift-click a row to link it in chat. Its position is remembered per account. It needs **Track drops** on, since it reads that log, and it fades rather than blinking out. The drop log keeps everything either way — the wipe is what the popup is showing, not what was recorded.
+**Moving and sizing it.** It has no header — a window this brief cannot spare the room — so it is dragged by its body *and by its rows*, which would otherwise swallow the drag. The grip in its bottom-right corner sets the width; the height is however many rows it is holding, so it grows and shrinks with the pack. Both are remembered per account.
+
+Because it only appears when something drops, there would otherwise be no way to find it to put it anywhere: so **cycling the Drop popup button shows it**, with a placeholder row to aim at. It fades on its own like any other showing.
+
+Right-click to put it away early, shift-click a row to link it in chat. It needs **Track drops** on, since it reads that log, and it fades rather than blinking out. The drop log keeps everything either way — the wipe is what the popup is showing, not what was recorded.
+
+It shares the **Show** threshold with the loot window and the log: one answer to "what is worth showing me", set in one place.
 
 `/apla popup <0-60>` sets the time, `/apla popup` on its own toggles it. It is part of a preset, so a raid preset can run it and a five-man preset leave it off.
 
@@ -277,18 +283,38 @@ Stacked rows sit above the rest in both tabs. They are the part of the list that
 
 The window resizes from the grip in its bottom-right corner and remembers both size and position. Hovering a row shows the item tooltip; shift-clicking drops the link into whatever you are typing. The header carries the session start and a running coin total.
 
-**The slider filters what you are looking at, not what gets kept.** With tracking on, everything that drops goes into the log — greys and quest items included — and the slider decides how far down the list you want to see, on both tabs. Drag it up to pull the night's epics out of a wall of vendor trash, drag it back down and they are all still there. When it is holding rows back the header says so: `4 of 63 lines`.
+#### What counts as a drop
+
+**Only what the group was actually offered:** an item the server rolled for — the window you would have answered without this addon — and, under master loot, one a loot addon announced. Nothing else.
+
+That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else that arrives through the loot system, and it is not a small difference:
+
+| Reads as loot | Is it a drop? |
+| --- | --- |
+| Soul Dust, Lesser Astral Essence | No — someone disenchanted the green they just won |
+| Tainted Core, Vashj's Vial Remnant | No — fight mechanics that happen to be items |
+| Greys and commons in a group | No — those are handed out round-robin, no roll, no window |
+| Quest pickups, herbs, anything you loot solo | No |
+| The green the party rolled on | **Yes** |
+| A stack of Nether Vortex someone won | **Yes** |
+| A tier token the master looter handed out | **Yes**, if a loot addon announced it |
+
+So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
+
+**One consequence worth knowing:** solo, nothing is ever rolled for, so nothing is logged. The log is a record of what the group was offered, not of what you picked up.
+
+**The slider filters what you are looking at, not what gets kept.** Everything that qualifies goes into the log and the slider decides how far down the list you want to see, on both tabs. Drag it up to pull the night's epics out of the greens, drag it back down and they are all still there. When it is holding rows back the header says so: `4 of 63 lines`.
 
 A threshold on the way in would throw away rows you could never ask for again; a filter on the way out can always be widened.
 
-Rows come from `CHAT_MSG_LOOT`, which is the only thing the client sends that carries a winner's name or says how many of something changed hands. `START_LOOT_ROLL` adds a row too, but only for items that do not stack: it fires before anyone has won, so the row waits with no winner until a loot message fills it in. Stackables are left to the loot message alone, because counting them from both events would count them twice.
-
-Two things follow from that:
+Two more things follow:
 
 - **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
-- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
+- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
 
-The log holds 1000 rows and drops the oldest beyond that. Stackables collapse to one row each, so the count is really a count of one-off drops — but since tracking takes greys too, that is a few hours of hard farming rather than a whole week. It is shared across all your characters, like the rest of the addon's settings.
+The log holds 1000 rows and drops the oldest beyond that. Stackables collapse to one row each, so it is really a count of one-off drops — a long while, now that it only holds what was rolled for. It is shared across all your characters, like the rest of the addon's settings.
+
+The coin total in the header is your share of the money, which has nothing to do with rolls and is counted regardless.
 
 ### Announcing
 
