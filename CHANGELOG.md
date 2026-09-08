@@ -29,6 +29,26 @@
   leave it off.
 
 ### Changed
+- The session log window is gone. It was a second place to read the same list,
+  and the loot window already lists what dropped, is already where the
+  threshold is set, and is already where the log is cleared. Middle-clicking
+  the minimap button turns the loot window on and off instead of opening it,
+  and `/apla loot` is gone with it. The log itself is untouched: it is what both
+  windows read.
+- "Track drops" is gone as a setting. The log is always kept, because both
+  windows need it and neither is on unless you turn it on -- a switch in front
+  of a switch. `/apla track` and the checkbox go with it.
+- The threshold starts at uncommon. Nothing below it can be logged any more:
+  the server only rolls for items at the group's loot threshold and up, and
+  that cannot be set below uncommon, so "Everything" and "Common and better"
+  were synonyms for it rather than wider answers. A threshold stored below
+  uncommon is moved up on load.
+- **Test** fakes a pull's worth of drops -- two gems and a pattern, spread out
+  so you can watch the clock go back to the full time on each -- rather than
+  testing the chat announcement. What you cannot picture from the settings is
+  where the popup sits and how long it lasts, and that is what a test is for.
+  Nothing about it is real: nothing announced, nothing rolled for, nothing
+  logged.
 - The log only takes what the group was actually offered: an item the server
   rolled for, or a master-looted one a loot addon announced. It used to take
   anything that said "receives loot", and that line cannot tell a drop from

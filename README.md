@@ -15,7 +15,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 - **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
 - **Never armed between sessions** — automated rolling starts each login off, on, or behind a prompt, whichever you pick
-- **Drop tracker** — an optional log of everything that dropped this session and who won it, kept across logouts until you clear it
+- **A drop popup** that appears when something drops, says what it was and goes again — the pack's haul read in the quiet after the pull, never on screen during one
 - **Pepe mode**, which puts a random cheerful pepe in front of every announcement
 
 ## Screenshots
@@ -26,7 +26,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 ## Usage
 
-Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click opens the drop log.
+Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click turns the loot window on and off.
 
 Armed is never carried between sessions. What happens at login is the **At login** button beside the "Roll automatically" checkbox — click it to cycle:
 
@@ -65,7 +65,7 @@ There is no Save button, deliberately. The live settings **are** the active pres
 
 | | |
 | --- | --- |
-| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the loot window and its grace period, the drop popup, drop tracking and the log's quality filter, and all three roll grids |
+| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the loot window and its grace period, the drop popup, the Show threshold, and all three roll grids |
 | **Not in a preset** | **At login**, where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
@@ -100,7 +100,7 @@ A code pasted straight after `/apla preset`, with no keyword, is recognised as o
 | `c` | Channel cap, 1 say to 4 yell |
 | `q` | Announce threshold, 0 to 5 |
 | `pe` | Pepe mode |
-| `t`, `tq` | Drop tracking, and its threshold |
+| `tq` | The Show threshold |
 | `h` | Loot window on or off |
 | `g` | Grace period in seconds, 0 for none |
 | `f` | Drop popup time in seconds, 0 for no popup |
@@ -177,8 +177,6 @@ Above the line are pending rolls. **The countdown is the row itself**: a band th
 
 Below the line, what already happened. A drop still pending above is not repeated below.
 
-**Drops only needs Track drops on**, because the list is the drop log's newest rows rather than a second list of its own. The window says so if you have one on without the other.
-
 #### Moving, sizing, closing
 
 | | |
@@ -196,12 +194,11 @@ Right-clicking anywhere on it — header, body or a row — opens a short menu:
 
 | | |
 | --- | --- |
-| Track drops | Toggle the log the list reads from. It is here because it is the one thing that can leave the window empty |
-| Show | The quality threshold, as the qualities themselves: **Everything**, **Uncommon and better**, and so on up to **Legendary only**, each in its own colour with a tick on the one in force |
-| Clear the drop log | Empties the log and starts a new session, here and in the log window. Asks first, unless there is nothing to lose |
+| Show | The quality threshold, as the qualities themselves: **Uncommon and better** up to **Legendary only**, each in its own colour with a tick on the one in force |
+| Clear the drop log | Empties the log and starts a new session. Asks first, unless there is nothing to lose |
 | Close this window | Same as the X |
 
-The threshold is the **same setting** as the slider at the bottom of the drop log — one threshold, two places to reach it, so changing it in either place moves both. Offering the qualities by name and colour rather than as a slider position means you pick the thing you want by looking at it instead of translating a position into a quality.
+The threshold is one setting shared by this window and the popup, and it starts at **uncommon**: nothing below that is ever logged, because the server only rolls for items at the group's loot threshold and up. Offering the qualities by name and colour rather than as a slider position means you pick the thing you want by looking at it instead of translating a position into a quality.
 
 #### Taking a roll back
 
@@ -223,7 +220,38 @@ Both settings are part of a preset, so a raid preset can run the window off and 
 
 #### Trying it out
 
-Group loot rolls only happen in a group, on Group Loot or Need Before Greed — solo, nothing is ever rolled for, so the pending half of this cannot be tested alone. **Drops only can**: turn on Track drops, set Loot window to Drops only, and kill something.
+Group loot rolls only happen in a group, on Group Loot or Need Before Greed — solo, nothing is ever rolled for, so none of this can be tested alone. What **can** be tested alone is the popup: the **Test** button fakes a pull's worth of drops so you can see it appear, fill up and go, and drag it somewhere while it is there. Nothing about it is real — nothing announced, nothing rolled for, nothing logged.
+
+#### What counts as a drop
+
+**Only what the group was actually offered:** an item the server rolled for — the window you would have answered without this addon — and, under master loot, one a loot addon announced. Nothing else.
+
+That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else that arrives through the loot system, and it is not a small difference:
+
+| Reads as loot | Is it a drop? |
+| --- | --- |
+| Soul Dust, Lesser Astral Essence | No — someone disenchanted the green they just won |
+| Tainted Core, Vashj's Vial Remnant | No — fight mechanics that happen to be items |
+| Greys and commons in a group | No — those are handed out round-robin, no roll, no window |
+| Quest pickups, herbs, anything you loot solo | No |
+| The green the party rolled on | **Yes** |
+| A stack of Nether Vortex someone won | **Yes** |
+| A tier token the master looter handed out | **Yes**, if a loot addon announced it |
+
+So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
+
+**One consequence worth knowing:** solo, nothing is ever rolled for, so nothing is logged. The log is a record of what the group was offered, not of what you picked up.
+
+**Show filters what you are looking at, not what gets kept.** Everything that qualifies goes into the log; the threshold on the right-click menu decides how far down the list you want to see. Set it to Rare for a raid night and the greens are still there when you set it back.
+
+A threshold on the way in would throw away rows you could never ask for again; a filter on the way out can always be widened.
+
+Two more things follow:
+
+- **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
+- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
+
+The log holds 1000 rows and drops the oldest beyond that. Stackables collapse to one row each, so it is really a count of one-off drops — a long while, now that it only holds what was rolled for. It is shared across all your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
 
 ### Drop popup
 
@@ -259,62 +287,11 @@ It has no grace period and no countdown because it has nothing you must answer. 
 
 Because it only appears when something drops, there would otherwise be no way to find it to put it anywhere: so **cycling the Drop popup button shows it**, with a placeholder row to aim at. It fades on its own like any other showing.
 
-Right-click to put it away early, shift-click a row to link it in chat. It needs **Track drops** on, since it reads that log, and it fades rather than blinking out. The drop log keeps everything either way — the wipe is what the popup is showing, not what was recorded.
+Right-click to put it away early, shift-click a row to link it in chat. It fades rather than blinking out. The drop log keeps everything either way — the wipe is what the popup is showing, not what was recorded.
 
-It shares the **Show** threshold with the loot window and the log: one answer to "what is worth showing me", set in one place.
+It shares the **Show** threshold with the loot window: one answer to "what is worth showing me", set in one place.
 
 `/apla popup <0-60>` sets the time, `/apla popup` on its own toggles it. It is part of a preset, so a raid preset can run it and a five-man preset leave it off.
-
-### Drop tracker
-
-Off by default. Turn it on with **Track drops** in the options, then **middle-click the minimap button** to open the log.
-
-A session lasts as long as you leave it. The log is saved between logins and emptied only when you say so — the **Clear** button here, or **Clear the drop log** in the loot window's right-click menu — so a night of trash runs with a logout in the middle is still one list. Either way it asks first, unless the log is already empty.
-
-Two tabs: **Everything**, and **Mine** for what the character you are on took. Mine is per character, not per account — a winner's name is the only thing that says whose a drop was, and the log is shared between your characters.
-
-| | |
-| --- | --- |
-| Non-stackable | One row per drop, with the winner's name |
-| Stackable | One row per item, with a running total, sorted to the top |
-| Nothing yet | A row that says `nobody` is a drop that was rolled but never picked up |
-
-Stacked rows sit above the rest in both tabs. They are the part of the list that stays the same length however long the night runs, so they belong where they can be read at a glance. Everything else follows, newest first.
-
-The window resizes from the grip in its bottom-right corner and remembers both size and position. Hovering a row shows the item tooltip; shift-clicking drops the link into whatever you are typing. The header carries the session start and a running coin total.
-
-#### What counts as a drop
-
-**Only what the group was actually offered:** an item the server rolled for — the window you would have answered without this addon — and, under master loot, one a loot addon announced. Nothing else.
-
-That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else that arrives through the loot system, and it is not a small difference:
-
-| Reads as loot | Is it a drop? |
-| --- | --- |
-| Soul Dust, Lesser Astral Essence | No — someone disenchanted the green they just won |
-| Tainted Core, Vashj's Vial Remnant | No — fight mechanics that happen to be items |
-| Greys and commons in a group | No — those are handed out round-robin, no roll, no window |
-| Quest pickups, herbs, anything you loot solo | No |
-| The green the party rolled on | **Yes** |
-| A stack of Nether Vortex someone won | **Yes** |
-| A tier token the master looter handed out | **Yes**, if a loot addon announced it |
-
-So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
-
-**One consequence worth knowing:** solo, nothing is ever rolled for, so nothing is logged. The log is a record of what the group was offered, not of what you picked up.
-
-**The slider filters what you are looking at, not what gets kept.** Everything that qualifies goes into the log and the slider decides how far down the list you want to see, on both tabs. Drag it up to pull the night's epics out of the greens, drag it back down and they are all still there. When it is holding rows back the header says so: `4 of 63 lines`.
-
-A threshold on the way in would throw away rows you could never ask for again; a filter on the way out can always be widened.
-
-Two more things follow:
-
-- **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
-- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
-
-The log holds 1000 rows and drops the oldest beyond that. Stackables collapse to one row each, so it is really a count of one-off drops — a long while, now that it only holds what was rolled for. It is shared across all your characters, like the rest of the addon's settings.
-
-The coin total in the header is your share of the money, which has nothing to do with rolls and is counted regardless.
 
 ### Announcing
 
@@ -362,11 +339,9 @@ this one and nothing breaks without it.
 | `/apla quality <0-5>` | Minimum quality to announce |
 | `/apla announce` | Toggle chat output (off prints locally) |
 | `/apla login <off\|on\|ask>` | What automated rolling does at login |
-| `/apla loot` | Open or close the drop log |
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
 | `/apla window` | Open or close the loot window (`/apla roll` also works) |
 | `/apla popup [0-60]` | Seconds the drop popup shows for; no number toggles it, 0 turns it off |
-| `/apla track` | Toggle drop tracking |
 | `/apla pepe` | Toggle pepe mode |
 | `/apla who` | Show the elected announcer and all peers |
 | `/apla debug` | Log every roll decision |

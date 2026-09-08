@@ -35,8 +35,7 @@ local defaults = {
     hud          = false,  -- the loot window: say what dropped as it drops
     grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
     popup        = 0,      -- seconds the drop popup shows for, 0 = no popup
-    track        = false,  -- keep a log of what dropped; off until you ask for it
-    trackMin     = 2,      -- log uncommon and better
+    trackMin     = 2,      -- the lowest quality worth showing; see MIN_TRACK
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
     -- for the same reason the action tables are
     debug        = false,  -- /apla debug: log every roll decision
@@ -54,7 +53,7 @@ local defaults = {
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
     "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "popup",
-    "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
+    "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
 local db   -- declared before anything that reads it, or it resolves to a nil global
@@ -200,8 +199,14 @@ end
 
 -- the announce threshold is a minimum (quality >= setting), so spell it out rather
 -- than saying "up to", which reads like the roll settings but means the opposite
+-- Nothing below uncommon is ever logged: the server only rolls for items at
+-- the group's loot threshold and up, and that cannot be set below uncommon. So
+-- the threshold starts there, and "everything" would have been a synonym for
+-- it rather than a wider answer.
+local MIN_TRACK = 2
+
 local function MinLabel(v)
-    if v <= 0 then return "everything" end
+    if v <= MIN_TRACK then return QualityLabel(MIN_TRACK) .. " and better" end
     if v >= 5 then return QualityLabel(v) .. " only" end
     return QualityLabel(v) .. " and better"
 end
@@ -539,7 +544,6 @@ local function EncodePreset(name, v)
         ("c=%d"):format(tonumber(v.channel) or defaults.channel),
         ("q=%d"):format(tonumber(v.minQuality) or defaults.minQuality),
         ("pe=%d"):format(v.pepe and 1 or 0),
-        ("t=%d"):format(v.track and 1 or 0),
         ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
         ("h=%d"):format(v.hud and 1 or 0),
         ("g=%d"):format(tonumber(v.grace) or defaults.grace),
@@ -587,8 +591,7 @@ local function DecodePreset(code)
         channel    = num("c", 1, 4, defaults.channel),
         minQuality = num("q", 0, 5, defaults.minQuality),
         pepe       = flag("pe", defaults.pepe),
-        track      = flag("t", defaults.track),
-        trackMin   = num("tq", 0, 5, defaults.trackMin),
+        trackMin   = num("tq", MIN_TRACK, 5, defaults.trackMin),
         hud        = flag("h", defaults.hud),
         grace      = num("g", 0, 60, defaults.grace),
         popup      = num("f", 0, 60, defaults.popup),
@@ -629,7 +632,7 @@ end
 local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
-local LogDrop, LogMoney, ClearLog, RefreshTracker, ToggleTracker
+local LogDrop, LogMoney, ClearLog
 local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
 
 -- The drop popup. Everything it owns hangs off this one table: the drop log
@@ -953,10 +956,10 @@ local function PruneToGroup()
 end
 
 ----------------------------------------------------------------
--- Drop tracker
+-- The drop log
 ----------------------------------------------------------------
 -- A session lasts as long as you leave it: the log is saved between logins and
--- emptied only by the Clear button, so a night of trash runs with a logout in
+-- emptied only when you ask, so a night of trash runs with a logout in
 -- the middle is still one list.
 --
 -- What the log is: the drops that were put to the group. An item the server
@@ -1061,7 +1064,6 @@ end
 -- rather than added to. The windows redraw either way; the popup only has
 -- something to appear about when there is a row.
 local function LootChanged(entry)
-    RefreshTracker()
     RefreshRollWindow()
     pop.wake(entry)
 end
@@ -1070,7 +1072,7 @@ end
 -- ProcessRoll saying the server has just put this item up for a roll, which is
 -- the one moment anything can be sure it is a drop rather than a disenchant.
 function LogDrop(link, count, winner, offered)
-    if not db.track or not link then return end
+    if not link then return end
 
     -- Recorded on the row rather than asked of the item later: the log outlives
     -- the client's item cache, and this is what the window filters on.
@@ -1218,7 +1220,6 @@ local ANNOUNCE_PAIR_WINDOW = 15
 
 -- link nil means "the reserves for the item announced a moment ago"
 function LogAnnounced(link, reserves)
-    if not db.track then return end
 
     if not link then
         if reserves and lastAnnounced
@@ -1260,10 +1261,10 @@ function LogAnnounced(link, reserves)
 end
 
 function LogMoney(copper)
-    if not db.track or not copper or copper <= 0 then return end
+    if not copper or copper <= 0 then return end
     db.loot.money = (db.loot.money or 0) + copper
     db.loot.started = db.loot.started or time()
-    RefreshTracker()
+    RefreshRollWindow()
 end
 
 function ClearLog()
@@ -1299,7 +1300,7 @@ end
 ----------------------------------------------------------------
 -- Minimap button
 ----------------------------------------------------------------
-local button, panel, tracker, RefreshPanel
+local button, panel, RefreshPanel
 
 -- built from the folder name, so renaming the addon folder can't break the paths
 local TEX_ON  = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Textures\\pass-on.tga"
@@ -1448,7 +1449,7 @@ local function ButtonTooltip(self)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine("|cffeda55fLeft click|r arm/disarm auto-pass", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fRight click|r settings", 1, 1, 1)
-    GameTooltip:AddLine("|cffeda55fMiddle click|r drop log", 1, 1, 1)
+    GameTooltip:AddLine("|cffeda55fMiddle click|r loot window", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fDrag|r move", 1, 1, 1)
     GameTooltip:Show()
 end
@@ -1505,7 +1506,13 @@ local function BuildButton()
         if mouseButton == "RightButton" then
             if panel:IsShown() then panel:Hide() else RefreshPanel(); panel:Show() end
         elseif mouseButton == "MiddleButton" then
-            ToggleTracker()
+            -- What used to open the session log. The loot window is the list
+            -- now, so this is the switch for it -- and turning it off takes the
+            -- grace period with it, the way every other route to off does.
+            db.hud = not db.hud
+            if not db.hud then db.grace = 0 end
+            RefreshRollWindow()
+            if panel and panel:IsShown() then RefreshPanel() end
         else
             ToggleAutopass()
             ButtonTooltip(self)
@@ -1849,7 +1856,7 @@ end
 
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 516 + PRESET_BAR_H + BOTTOM_BAR_H)
+    panel:SetSize(340, 488 + PRESET_BAR_H + BOTTOM_BAR_H)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -2071,44 +2078,10 @@ local function BuildPanel()
     -- A hand-written one is short of the fields this client emits, and the
     -- server drops a chat message carrying a malformed link without a word,
     -- so Test did nothing in a group while printing fine when solo.
-    local TEST_ITEM = 32235   -- Cursed Vision of Sargeras
-
-    local function TestSay(link)
-        if not db.announce then
-            print("|cff66ccffAPLA|r announce to chat is off, so this only prints here")
-        elseif not ResolveChannel() then
-            print(("|cff66ccffAPLA|r cap is %s and you are not in a group, so this only prints here")
-                :format(CHANNEL_NAME[db.channel] or "?"))
-        end
-        SayList({ link }, true)
-    end
-
-    local function TestAnnounce()
-        local link = select(2, GetItemInfo(TEST_ITEM))
-        if link then
-            TestSay(link)
-            return
-        end
-        -- That call asked the server for the item, so give it a moment.
-        C_Timer.After(1, function()
-            local retry = select(2, GetItemInfo(TEST_ITEM))
-            if retry then
-                TestSay(retry)
-            else
-                print("|cff66ccffAPLA|r could not load the test item, click Test again")
-            end
-        end)
-    end
-
     panel.pepe = MakeCheck(body, "APLACheckPepe", "Pepe mode", 16, -446,
         "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
             .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
         function(v) db.pepe = v end)
-
-    panel.track = MakeCheck(body, "APLACheckTrack", "Track drops", 16, -474,
-        "Keeps a list of what dropped this session and who won it. Middle-click the minimap "
-            .. "button to open it. The list is kept between logins until you clear it.",
-        function(v) db.track = v; LootChanged() end)
 
     -- On the bottom bar rather than a row of its own: the panel is already as
     -- tall as some people's screens, and this is a cycle button like At login
@@ -2128,7 +2101,7 @@ local function BuildPanel()
         "|cffffd100Off|r - nothing on screen. Rolls are answered the moment they drop and "
             .. "Blizzard's roll windows are left alone, exactly as without this setting.",
         "|cffffd100Drops only|r - lists what dropped and who took it, as it happens. Rolls are "
-            .. "still answered straight away. Needs Track drops on, since it reads that log.",
+            .. "still answered straight away.",
         "|cffffd1003s and up|r - also holds each roll the addon is going to answer for that long "
             .. "and counts down to it, with Blizzard's window held back for those rolls only.",
         "Click a row there to take that one back: the auto-roll is dropped and the normal roll "
@@ -2160,9 +2133,11 @@ local function BuildPanel()
         "|cffffd100Never in combat.|r What drops while you are fighting is held back and shown "
             .. "the moment you are not, which is the point of it: you read it while the healer "
             .. "drinks, not while you are being hit.",
-        "Drag to move it, right-click to put it away early, shift-click a row to link it. Needs "
-            .. "Track drops on, since it reads that log, and it only appears for drops the "
-            .. "|cffffd100Show|r threshold lets through.",
+        "Drag it by its rows to move it, the corner grip sets the width, right-click puts it "
+            .. "away early and shift-click links a row in chat.",
+        "It only appears for drops the |cffffd100Show|r threshold lets through, which is set on "
+            .. "the loot window's right-click menu. |cffffd100Test|r fakes a pull so you can see "
+            .. "it and place it.",
     })
 
     local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
@@ -2170,9 +2145,15 @@ local function BuildPanel()
     test:SetPoint("BOTTOMRIGHT", -12, 12)
     test:SetText("Test")
     test:SetScript("OnClick", function()
-        edit:ClearFocus()   -- commit a half-typed prefix so the test uses it
-        TestAnnounce()
+        edit:ClearFocus()
+        pop.demo()
     end)
+    AttachTooltip(test, "Test", {
+        "Fakes a pull's worth of drops so you can see the |cffffd100Drop popup|r appear, fill "
+            .. "up and go again -- and drag it somewhere while it is there.",
+        "None of it is real: nothing is announced, nothing is rolled for, and nothing goes into "
+            .. "the drop log.",
+    })
 end
 
 function RefreshPanel()
@@ -2181,7 +2162,6 @@ function RefreshPanel()
     panel.announce:SetChecked(db.announce)
     panel.minimap:SetChecked(not db.minimapHide)
     panel.pepe:SetChecked(db.pepe)
-    panel.track:SetChecked(db.track)
     panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
     panel.hud:SetText("Loot window: " .. HudLabel(db.hud, db.grace))
     panel.popup:SetText("Drop popup: " .. pop.label(db.popup))
@@ -2193,31 +2173,15 @@ function RefreshPanel()
 end
 
 ----------------------------------------------------------------
--- Tracker window
+-- Reading the drop log
 ----------------------------------------------------------------
--- Row frames are built once and the list is drawn into them as it scrolls, so
--- the only thing resizing has to do is decide how many of them are on show.
--- Forty covers the tallest the window is allowed to get.
-local TRACK_ROW_H, MAX_TRACK_ROWS = 18, 40
-local TRACK_MIN_W, TRACK_MIN_H = 360, 286
-local TRACK_MAX_W, TRACK_MAX_H = 900, 800
-local TRACK_LIST_TOP = 78   -- below the title, the tabs and the stats line
-local TRACK_FOOTER   = 90   -- room for the threshold slider and the Clear button
+-- The three questions both windows ask of a logged row, and nothing that owns
+-- a frame. There used to be a third window here -- a session log with tabs, a
+-- slider and a Clear button -- and it went because it was a second place to
+-- read the same list. The loot window already lists what dropped, is already
+-- where the threshold is set, and is already where the log is cleared from.
 local UNKNOWN_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
-local TRACK_VIEWS = {
-    { key = "all",  label = "Everything" },
-    { key = "mine", label = "Mine" },
-}
-
--- Built fresh on each redraw rather than kept alongside the real log, so there
--- is only ever one list to keep straight. A stack is split back out through the
--- per-winner counts on the row.
---
--- The result comes back in the order it is drawn: stacked rows first, then the
--- rest, newest first within each. Stacks are the part of the list that stays
--- the same length however long the night runs, so they belong at the top where
--- they can be read at a glance instead of scrolled past.
 -- The quality a row was logged at. Rows written before the log recorded it
 -- fall back to the item's own link, which carries the colour whether or not
 -- the client still remembers the item, and the answer is kept on the row so
@@ -2261,277 +2225,6 @@ local function ShortReserve(res)
     local more = 1
     for _ in rest:gmatch(",") do more = more + 1 end
     return ("%s +%d"):format((first:gsub("%s+$", "")), more)
-end
-
--- Returns the list, and how many rows this tab holds that the quality slider
--- is hiding, so the header can own up to them.
-local function ViewEntries()
-    local all  = db.loot.entries
-    local mine = tracker.view == "mine"
-    local me   = mine and Me() or nil
-    local min  = db.trackMin or 0
-
-    -- how much of this row belongs in this tab: the whole thing on Everything,
-    -- and on Mine your own share of a stack or nothing at all
-    local function share(e)
-        if not mine then return e.count end
-        if e.stack then return e.by and e.by[me] or 0 end
-        return e.winner == me and e.count or 0
-    end
-
-    local stacks, singles, hidden = {}, {}, 0
-    for i = #all, 1, -1 do   -- newest first
-        local e = all[i]
-        local n = share(e)
-        if n > 0 then
-            if EntryQuality(e) < min then
-                hidden = hidden + 1
-            elseif e.stack and mine then
-                stacks[#stacks + 1] = { id = e.id, link = e.link, count = n,
-                                        stack = true, q = e.q, t = e.t }
-            elseif e.stack then
-                SplitStack(e, stacks)
-            else
-                singles[#singles + 1] = e
-            end
-        end
-    end
-
-    for _, e in ipairs(singles) do stacks[#stacks + 1] = e end
-    return stacks, hidden
-end
-
-local function LayoutTracker()
-    if not tracker or not tracker.rows then return end
-
-    local w, h = tracker:GetWidth(), tracker:GetHeight()
-    local shown = math.floor((h - TRACK_LIST_TOP - TRACK_FOOTER) / TRACK_ROW_H)
-    if shown < 1 then shown = 1 end
-    if shown > MAX_TRACK_ROWS then shown = MAX_TRACK_ROWS end
-    tracker.visibleRows = shown
-
-    tracker.stats:SetWidth(w - 30)
-    tracker.scroll:SetSize(w - 50, shown * TRACK_ROW_H)   -- less the scrollbar
-    tracker.slider:SetWidth(w - 150)                      -- less the Clear button
-
-    local rowW = w - 70
-    for _, row in ipairs(tracker.rows) do
-        row:SetWidth(rowW)
-        row.text:SetWidth(rowW - 130)   -- icon, gap and the winner column
-    end
-
-    RefreshTracker()
-end
-
-local function BuildTracker()
-    tracker = CreateFrame("Frame", "AutoPassLootAnnouncerTracker", UIParent,
-        "BasicFrameTemplateWithInset")
-    tracker:SetSize(db.trackerSize and db.trackerSize.w or 440,
-                    db.trackerSize and db.trackerSize.h or 430)
-    tracker:SetPoint("CENTER")
-    tracker:SetMovable(true)
-    tracker:SetResizable(true)
-    -- SetResizeBounds is the modern name for the pair below it, guarded the way
-    -- SetObeyStepOnDrag and SetColorTexture are
-    if tracker.SetResizeBounds then
-        tracker:SetResizeBounds(TRACK_MIN_W, TRACK_MIN_H, TRACK_MAX_W, TRACK_MAX_H)
-    else
-        tracker:SetMinResize(TRACK_MIN_W, TRACK_MIN_H)
-        tracker:SetMaxResize(TRACK_MAX_W, TRACK_MAX_H)
-    end
-    tracker:EnableMouse(true)
-    tracker:RegisterForDrag("LeftButton")
-    tracker:SetScript("OnDragStart", tracker.StartMoving)
-    tracker:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, rel, x, y = self:GetPoint()
-        db.trackerPos = { point = point, rel = rel, x = x, y = y }
-    end)
-    tracker:SetClampedToScreen(true)
-    tracker:SetFrameStrata("DIALOG")   -- same strata as the settings panel, see there
-    tracker:SetToplevel(true)
-    tracker:Hide()
-    tinsert(UISpecialFrames, "AutoPassLootAnnouncerTracker")   -- Escape closes it
-
-    if db.trackerPos then
-        tracker:ClearAllPoints()
-        tracker:SetPoint(db.trackerPos.point, UIParent, db.trackerPos.rel,
-            db.trackerPos.x, db.trackerPos.y)
-    end
-
-    local title = tracker:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -6)
-    title:SetText("Session loot")
-
-    -- "Mine" is this character, not the account. The log is shared between your
-    -- characters and a winner's name is the only thing that says whose a drop
-    -- was, so it can only ever answer per character.
-    local function SelectView(key)
-        tracker.view = key
-        db.trackerView = key
-        for i, v in ipairs(TRACK_VIEWS) do
-            PaintTab(tracker.tabs[i], 1, 0.82, 0, v.key == key)
-        end
-        local bar = _G["APLATrackerScrollScrollBar"]
-        if bar then bar:SetValue(0) end   -- a new list starts at the top
-        RefreshTracker()
-    end
-
-    tracker.tabs = {}
-    for i, v in ipairs(TRACK_VIEWS) do
-        local tb = MakeTab(tracker, 104, 22, v.label)
-        tb:SetPoint("TOPLEFT", 14 + (i - 1) * 107, -32)
-        tb:SetScript("OnClick", function() SelectView(v.key) end)
-        tracker.tabs[i] = tb
-    end
-
-    tracker.stats = tracker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tracker.stats:SetPoint("TOPLEFT", 14, -58)
-    tracker.stats:SetJustifyH("LEFT")
-
-    local scroll = CreateFrame("ScrollFrame", "APLATrackerScroll", tracker,
-        "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 12, -TRACK_LIST_TOP)
-    scroll:SetScript("OnVerticalScroll", function(self, offset)
-        FauxScrollFrame_OnVerticalScroll(self, offset, TRACK_ROW_H, RefreshTracker)
-    end)
-    tracker.scroll = scroll
-
-    tracker.rows = {}
-    for i = 1, MAX_TRACK_ROWS do
-        local row = CreateFrame("Button", nil, tracker)
-        row:SetHeight(TRACK_ROW_H)
-        row:SetPoint("TOPLEFT", 14, -TRACK_LIST_TOP - (i - 1) * TRACK_ROW_H)
-
-        row.icon = row:CreateTexture(nil, "ARTWORK")
-        row.icon:SetSize(14, 14)
-        row.icon:SetPoint("LEFT", 0, 0)
-
-        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.text:SetPoint("LEFT", 20, 0)
-        row.text:SetJustifyH("LEFT")
-
-        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.who:SetPoint("RIGHT", -4, 0)
-        row.who:SetWidth(100)
-        row.who:SetJustifyH("RIGHT")
-
-        local hl = row:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        Fill(hl, 1, 1, 1, 0.08)
-
-        row:SetScript("OnEnter", function(self)
-            if not self.link then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(self.link)
-            if self.res then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine("Reserved by: " .. self.res, 1, 0.82, 0, true)
-            end
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- shift-click drops the link into whatever you are typing, the same way
-        -- clicking an item anywhere else in the UI does
-        row:SetScript("OnClick", function(self)
-            if self.link then HandleModifiedItemClick(self.link) end
-        end)
-
-        row:Hide()
-        tracker.rows[i] = row
-    end
-
-    -- Filters what is on screen, not what gets kept: tracking takes the lot.
-    -- It lives here rather than in the settings panel because this is the
-    -- window where you notice the list filling up with things you do not want.
-    --
-    -- The guard is against SetValue in RefreshTracker coming back round through
-    -- this handler and refreshing again; the client does not fire the handler
-    -- for a value that has not moved, but a redraw loop is not worth the risk.
-    tracker.slider = MakeSlider(tracker, "APLATrackSlider", 0, 0, 5, "Poor", "Legendary",
-        "Show: ", MinLabel, function(v)
-            if v == db.trackMin then return end
-            db.trackMin = v
-            RefreshTracker()
-        end)
-    tracker.slider:ClearAllPoints()   -- bottom-anchored, so resizing leaves it alone
-    tracker.slider:SetPoint("BOTTOMLEFT", 24, 52)
-
-    local clear = CreateFrame("Button", nil, tracker, "UIPanelButtonTemplate")
-    clear:SetSize(90, 22)
-    clear:SetPoint("BOTTOMRIGHT", -26, 12)   -- clear of the resize grip
-    clear:SetText("Clear")
-    clear.tooltipText = "Empties the log and starts a new session. Asks first."
-    clear:SetScript("OnClick", function() ConfirmClearLog() end)
-
-    local grip = CreateFrame("Button", nil, tracker)
-    grip:SetSize(16, 16)
-    grip:SetPoint("BOTTOMRIGHT", -6, 6)
-    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    grip:SetScript("OnMouseDown", function() tracker:StartSizing("BOTTOMRIGHT") end)
-    grip:SetScript("OnMouseUp", function()
-        tracker:StopMovingOrSizing()
-        db.trackerSize = { w = tracker:GetWidth(), h = tracker:GetHeight() }
-        LayoutTracker()
-    end)
-
-    tracker:SetScript("OnSizeChanged", LayoutTracker)
-    tracker:SetScript("OnShow", function() RefreshTracker() end)
-    SelectView(db.trackerView == "mine" and "mine" or "all")
-    LayoutTracker()
-end
-
-function RefreshTracker()
-    if not tracker or not tracker:IsShown() then return end
-
-    local entries, hidden = ViewEntries()
-    local n = #entries
-    local shown = tracker.visibleRows or 1
-
-    local when = db.loot.started and date("%d %b %H:%M", db.loot.started) or "nothing yet"
-    -- "3 of 63" whenever the slider is holding rows back, so a short list never
-    -- looks like a session that did not happen
-    local count = hidden > 0 and ("%d of %d"):format(n, n + hidden) or tostring(n)
-    tracker.stats:SetText(("%s %s since %s          %s%s"):format(
-        count, (n + hidden) == 1 and "line" or "lines", when,
-        GetCoinTextureString(db.loot.money or 0),
-        db.track and "" or "   |cffff8000(tracking is off)|r"))
-
-    FauxScrollFrame_Update(tracker.scroll, n, shown, TRACK_ROW_H)
-    local offset = FauxScrollFrame_GetOffset(tracker.scroll)
-
-    for i, row in ipairs(tracker.rows) do
-        local e = (i <= shown) and entries[offset + i] or nil   -- already in draw order
-        if e then
-            row.link, row.res = e.link, e.res
-            row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
-            row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r") or e.link)
-            if tracker.view == "mine" then
-                row.who:SetText(e.stack and "|cff808080your share|r" or "|cff808080yours|r")
-            elseif e.winner then
-                row.who:SetText("|cffffff00" .. e.winner .. "|r")
-            elseif e.stack then
-                row.who:SetText("|cff808080stacked|r")
-            elseif e.res then
-                row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
-            else
-                row.who:SetText("|cff808080nobody|r")
-            end
-            row:Show()
-        else
-            row.link, row.res = nil, nil
-            row:Hide()
-        end
-    end
-
-    tracker.slider:SetValue(db.trackMin or 2)
-end
-
-function ToggleTracker()
-    if not tracker then return end
-    if tracker:IsShown() then tracker:Hide() else tracker:Show() end
 end
 
 -- Redrawing after a preset has been switched, renamed or imported. A preset
@@ -2729,8 +2422,7 @@ function RefreshRollWindow()
     if npend == 0 and #recent == 0 then
         -- The one dependency worth spelling out: the drops half of this window
         -- reads the drop log, and there is no log until tracking is on.
-        rollWin.hint:SetText(db.track and "Nothing yet."
-            or "Turn on Track drops to list what you loot here.")
+        rollWin.hint:SetText("Nothing yet.")
         rollWin.hint:Show()
     else
         rollWin.hint:Hide()
@@ -2817,8 +2509,6 @@ end
 -- it. Same setting as the slider in the drop log -- one threshold, two places
 -- to reach it -- so the log follows and vice versa.
 --
--- "Track drops" is in here too, because it is the other thing that can leave
--- this window empty, and the empty window says so.
 local rollMenu
 
 local function RollMenuInit(_, level)
@@ -2831,29 +2521,16 @@ local function RollMenuInit(_, level)
         UIDropDownMenu_AddButton(info, level)
     end
 
-    Add({
-        text = "Track drops",
-        checked = db.track and true or false,
-        func = function()
-            db.track = not db.track
-            RefreshTracker()
-            RefreshRollWindow()
-            if panel and panel:IsShown() then RefreshPanel() end
-        end,
-    })
-
-    Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
     Add({ text = "Show", isTitle = true, notCheckable = true })
 
-    for q = 0, 5 do
+    for q = MIN_TRACK, 5 do
         Add({
             -- MinLabel already colours the quality; it is written lower case
             -- for the middle of a slider caption, which is not this
-            text = q == 0 and "Everything" or MinLabel(q),
+            text = MinLabel(q),
             checked = (db.trackMin or 0) == q,
             func = function()
                 db.trackMin = q
-                RefreshTracker()
                 RefreshRollWindow()
                 CloseDropDownMenus()
             end,
@@ -3339,10 +3016,12 @@ function pop.refresh()
     for i, row in ipairs(pop.rows) do
         local e = list[i]
         if e then
-            -- the placeholder has no item behind it, so it gets no link either
+            -- a made-up row has no item behind it, so it gets no link either,
+            -- and brings its own icon since there is nothing to ask
             row.link, row.res = (not e.sample) and e.link or nil, e.res
-            row.icon:SetTexture(not e.sample
-                and (select(10, GetItemInfo(e.link)) or UNKNOWN_ICON) or UNKNOWN_ICON)
+            row.icon:SetTexture(e.icon
+                or (not e.sample and select(10, GetItemInfo(e.link)))
+                or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
             if not e.winner and not e.stack and e.res then
@@ -3414,6 +3093,45 @@ function pop.tick()
     end
 end
 
+-- A pull's worth of drops, which is what the Test button does. Rows rather
+-- than log entries: nothing here is written down, and nothing here is an item
+-- you can click, because none of it happened.
+--
+-- It used to test the chat announcement instead, which was the wrong thing to
+-- put behind that button. What you cannot picture from the settings is where
+-- this window sits and how long it lasts, and that is what a test is for.
+function pop.demo()
+    if not pop.on() then
+        print("|cff66ccffAPLA|r the drop popup is off -- it is the button beside Test")
+        return
+    end
+    if InCombatLockdown() then
+        print("|cff66ccffAPLA|r not while you are fighting: that is the point of it")
+        return
+    end
+
+    pop.gone()
+
+    local me = Me()
+    local pull = {
+        { link = "|cffa335ee[Crimson Spinel]|r", winner = me,
+          icon = "Interface\\Icons\\INV_Misc_Gem_Ruby_02" },
+        { link = "|cffa335ee[Pattern: Swiftheal Mantle]|r",
+          icon = "Interface\\Icons\\INV_Scroll_03" },
+        { link = "|cff0070dd[Living Ruby]|r", count = 2, winner = me,
+          icon = "Interface\\Icons\\INV_Misc_Gem_Ruby_01" },
+    }
+
+    -- Spread out, so the clock going back to the full time on each one is the
+    -- thing you actually see happen.
+    for i, row in ipairs(pull) do
+        row.sample, row.count, row.q = true, row.count or 1, 5
+        C_Timer.After((i - 1) * 0.9, function()
+            if pop.on() then pop.wake(row, true) end
+        end)
+    end
+end
+
 -- What the panel shows you while you are choosing where it lives. A real
 -- showing in every respect, so what you are aiming at is the thing itself.
 function pop.preview()
@@ -3438,7 +3156,6 @@ end
 -- are aiming at it rather than reading it.
 function pop.wake(entry, force)
     if not pop.on() then return end
-    if not force and not db.track then return end
 
     if entry then
         -- The same threshold the windows filter on, so a trash pull does not
@@ -3480,7 +3197,6 @@ function RefreshAll()
     else
         UpdateButtonLook()
     end
-    RefreshTracker()
     RefreshRollWindow()
     if not pop.on() then pop.gone() end
     -- whether this copy announces at all is part of a preset, so the group's
@@ -3521,6 +3237,11 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         for k, v in pairs(defaults) do
             if db[k] == nil then db[k] = v end
         end
+
+        -- The threshold used to go down to poor, from when the log took
+        -- everything that said "receives loot". Nothing below uncommon is
+        -- logged now, so a stored 0 or 1 is a setting with no row to tick.
+        if (tonumber(db.trackMin) or 0) < MIN_TRACK then db.trackMin = MIN_TRACK end
 
         if type(db.actionsBoP) ~= "table" or type(db.actionsBoE) ~= "table" then
             -- Whatever the last version stored goes to both bind types, so the
@@ -3582,7 +3303,6 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         BuildPanel()
         BuildPresetCode()
         BuildArmPrompt()
-        BuildTracker()
         BuildRollWindow()
         UpdateButtonLook()
 
@@ -3814,9 +3534,6 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         else
             print("|cff66ccffAPLA|r /apla login off|on|ask")
         end
-    elseif cmd == "loot" then
-        ToggleTracker()
-        return
     elseif cmd == "window" or cmd == "roll" then
         -- Turning the window off turns the grace off with it. A roll held back
         -- with nowhere to see it is worse than either setting on its own.
@@ -3852,10 +3569,6 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         else
             print("|cff66ccffAPLA|r /apla grace <0-60>, seconds; 0 answers straight away")
         end
-    elseif cmd == "track" then
-        db.track = not db.track
-        print("|cff66ccffAPLA|r drop tracking: " .. tostring(db.track))
-        RefreshTracker()
     elseif cmd == "pepe" then
         db.pepe = not db.pepe
         print("|cff66ccffAPLA|r pepe mode: " .. tostring(db.pepe))
