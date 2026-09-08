@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.7.2] - 2026-09-08
+
+### Added
+- Master-looted drops appear in the window when they drop, rather than when
+  somebody is handed one. Under master loot there is no roll to hang a drop on,
+  so until now the first the log heard of an item was "X receives loot", which
+  is the end of the story rather than the start of it. What the raid does see
+  is the loot master's addon announcing the drop, and that is what these rows
+  are read from.
+- Reserves are kept with the drop. A row nobody has won yet shows who is first
+  in line and how many are behind -- "Zenoss +1" -- and the names in full are on
+  the row's tooltip. The winner replaces them when the item is handed over, and
+  the reserves stay on the row for reference.
+- Only two shapes are read, and both of them are an addon talking rather than a
+  person: Gargul, which stamps a raid marker and its own name in front of
+  everything it says to the group, and LootReserve, which says "<item> is
+  reserved by: ...". A raider linking an item to ask who needs it is not an
+  announcement and is left alone.
+- An announced item waits half an hour for its name instead of the three
+  minutes a roll gets, because a master looter deliberating is not a
+  ten-second roll. An item that is announced and rolled -- Gargul alongside
+  group loot -- fills the row already waiting rather than listing it twice.
+
+### Fixed
+- The addon no longer makes the client say "You are not in a raid group" every
+  few seconds in a battleground or arena. A battleground group is an *instance*
+  group and its addon traffic has to go to INSTANCE_CHAT; sent to RAID, as it
+  was, the client rejects it and says so. Battlegrounds churn their roster
+  constantly and every roster change sends a hello, which is what made it a
+  message every few seconds rather than an occasional one. Hellos are no longer
+  sent in a battleground or arena at all -- there is no group loot there to
+  elect an announcer for -- and everywhere else that is an instance group, a
+  dungeon-finder party included, both the hellos and the announcements go to
+  INSTANCE_CHAT.
+
 ## [1.7.1] - 2026-09-08
 
 ### Changed

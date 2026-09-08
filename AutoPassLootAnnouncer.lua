@@ -638,12 +638,27 @@ local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
 --   cap Raid  -> raid, or party when only grouped, or nothing when solo
 --   cap Party -> party when grouped, nothing when solo
 --   cap Say   -> always say
+-- A dungeon-finder party, a battleground or an arena team is an "instance"
+-- group, and everything sent to one -- chat and addon traffic alike -- goes to
+-- INSTANCE_CHAT. Sent to RAID instead, the client rejects it and says "You are
+-- not in a raid group", which is the message rather than anything we printed.
+-- Guarded on the constant because a client old enough not to have it has no
+-- instance groups either, and there falls through to the old answer.
+local function InstanceGroup()
+    return LE_PARTY_CATEGORY_INSTANCE ~= nil
+        and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) == true
+end
+
 local function ResolveChannel()
     if not db.announce then return nil end
     local cap = db.channel or 3
     if cap >= 4 then return "YELL" end
-    if cap >= 3 and IsInRaid() then return "RAID" end
-    if cap >= 2 and IsInGroup() then return "PARTY" end   -- your subgroup while in a raid
+    if cap >= 3 and IsInRaid() then
+        return InstanceGroup() and "INSTANCE_CHAT" or "RAID"
+    end
+    if cap >= 2 and IsInGroup() then                      -- your subgroup while in a raid
+        return InstanceGroup() and "INSTANCE_CHAT" or "PARTY"
+    end
     if cap <= 1 then return "SAY" end
     return nil                                            -- grouped-only cap, but solo
 end
@@ -814,6 +829,13 @@ local lastHello, lastRequest = 0, 0
 local function Me() return UnitName("player") end
 
 local function GroupChannel()
+    -- A battleground or arena is a group this addon has no business in: there
+    -- is no group loot to announce, and a battleground roster churns hard
+    -- enough that the hello on every GROUP_ROSTER_UPDATE became one message
+    -- every three seconds.
+    local _, kind = IsInInstance()
+    if kind == "pvp" or kind == "arena" then return nil end
+    if InstanceGroup() then return "INSTANCE_CHAT" end
     if IsInRaid() then return "RAID" end
     if IsInGroup() then return "PARTY" end
     return nil
@@ -916,6 +938,10 @@ end
 -- falling off the far end.
 local MAX_LOOT_ROWS     = 1000
 local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
+-- A master-looted item waits on the loot master rather than on a ten-second
+-- roll, and that can be most of a boss fight later, so an announced row is
+-- given the rest of the raid to find its name.
+local ANNOUNCED_MATCH_WINDOW = 1800
 
 -- "%s receives loot: %sx%d." and friends are format strings, not patterns, so
 -- escape everything magic and turn the placeholders into captures.
@@ -1001,6 +1027,16 @@ function LogDrop(link, count, winner)
 
     if stacks then
         if not winner then return end   -- wait for the loot message to say how many
+        -- An announcement can have put a winner-less row in for this item
+        -- before anyone had it. A stack keeps its tally on one row of its own
+        -- instead, so the placeholder has done its job, and left alone it would
+        -- sit at "nobody" for the rest of the night.
+        for i = #entries, 1, -1 do
+            local e = entries[i]
+            if e.id == id and e.announced and not e.stack and not e.winner then
+                table.remove(entries, i)
+            end
+        end
         for _, e in ipairs(entries) do
             if e.id == id and e.stack then
                 e.count, e.t = e.count + count, time()
@@ -1020,7 +1056,8 @@ function LogDrop(link, count, winner)
         -- order the rolls did rather than backwards
         for _, e in ipairs(entries) do
             if e.id == id and not e.stack and not e.winner
-                and (time() - e.t) <= LOOT_MATCH_WINDOW then
+                and (time() - e.t)
+                    <= (e.announced and ANNOUNCED_MATCH_WINDOW or LOOT_MATCH_WINDOW) then
                 e.winner = winner
                 LootChanged()
                 return
@@ -1035,6 +1072,109 @@ function LogDrop(link, count, winner)
     db.loot.started = db.loot.started or time()
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
     Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
+    LootChanged()
+end
+
+----------------------------------------------------------------
+-- What the loot addons announce
+----------------------------------------------------------------
+-- Under master loot nothing reaches the log until an item is handed over:
+-- there is no START_LOOT_ROLL to hang a drop on, and "receives loot" is the end
+-- of the story rather than the start of it. What the raid does see is the loot
+-- master's addon announcing the drop, and that is where these rows come from.
+--
+-- Only two shapes are read, and both of them are an addon talking rather than a
+-- person. Gargul prefixes everything it says to the group with a raid marker,
+-- its own name and a colon, and follows the item with a separate "Reserved by"
+-- line; LootReserve says it on one line as "<item> is reserved by: ...". A
+-- raider linking an item to ask who needs it is not an announcement and is left
+-- alone, which is the whole reason for matching shapes instead of every link
+-- that goes past.
+local ITEM_LINK   = "|c%x+|Hitem:.-|h.-|h|r"
+local GARGUL_SAID = "^%s*(.-)Gargul%s*:%s*(.+)$"
+
+-- Gargul stamps a raid marker in front of its name. That reaches us as the
+-- "{rt3}" the sender typed, or as the texture the client made of it, or not at
+-- all on a client or version that leaves it off -- so all three are allowed,
+-- and nothing else is. Without that last part "who reserved this, Gargul : ..."
+-- typed by a raider would read as an announcement.
+local function IsMarker(head)
+    return head == "" or head:match("^{%a*%d*}%s*$") ~= nil
+        or head:match("^|T.-|t%s*$") ~= nil
+end
+
+-- Returns the item link and the reserves, either of which can be missing: an
+-- item on its own is a drop with nobody on it yet, and reserves on their own
+-- belong to the item announced a moment ago.
+local function ParseAnnouncement(msg)
+    if not msg then return end
+    if not msg:find("|Hitem:", 1, true) and not msg:find("eserved", 1, true) then
+        return   -- neither half of an announcement, and most chat is neither
+    end
+
+    -- LootReserve, which carries both halves and announces under its own name
+    local link, names = msg:match("^(" .. ITEM_LINK .. ")%s+is reserved by:%s*(.+)$")
+    if link then return link, names end
+
+    local head, said = msg:match(GARGUL_SAID)
+    if not said or not IsMarker(head) then return end
+
+    names = said:match("^Reserved by:%s*(.+)$")
+    if names then return nil, names end
+
+    -- the item by itself, or the same line with the hard-reserve note on it
+    link = said:match("^(" .. ITEM_LINK .. ")%s*$")
+        or said:match("^(" .. ITEM_LINK .. ")%s*%(This item is hard%-reserved!%)%s*$")
+    if link then return link end
+end
+
+-- The row the next "Reserved by" line belongs to. Kept as a reference rather
+-- than an index because the log trims from the front, and short-lived because
+-- the two lines are sent back to back: a reserve line that arrives long after
+-- its item has nothing to do with it.
+local lastAnnounced, lastAnnouncedAt = nil, 0
+local ANNOUNCE_PAIR_WINDOW = 15
+
+-- link nil means "the reserves for the item announced a moment ago"
+function LogAnnounced(link, reserves)
+    if not db.track then return end
+
+    if not link then
+        if reserves and lastAnnounced
+            and (time() - lastAnnouncedAt) <= ANNOUNCE_PAIR_WINDOW then
+            lastAnnounced.res = reserves
+            LootChanged()
+        end
+        return
+    end
+
+    local id = ItemID(link)
+    if not id then return end
+
+    local entries = db.loot.entries
+
+    -- The same drop can be both announced and rolled -- group loot fires
+    -- START_LOOT_ROLL and Gargul announces the item alongside it -- so fill the
+    -- row already waiting for a winner rather than listing the item twice.
+    for i = #entries, 1, -1 do
+        local e = entries[i]
+        if e.id == id and not e.stack and not e.winner
+            and (time() - e.t) <= LOOT_MATCH_WINDOW then
+            if reserves then e.res = reserves end
+            lastAnnounced, lastAnnouncedAt = e, time()
+            LootChanged()
+            return
+        end
+    end
+
+    local e = { id = id, link = link, count = 1, q = QualityOf(link), t = time(),
+                announced = true, res = reserves }
+    entries[#entries + 1] = e
+    lastAnnounced, lastAnnouncedAt = e, time()
+
+    db.loot.started = db.loot.started or time()
+    while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
+    Dbg("announced %s res=%s", tostring(link), tostring(reserves))
     LootChanged()
 end
 
@@ -1999,6 +2139,17 @@ local function SplitStack(e, out)
     return out
 end
 
+-- "Hikø +2" out of "Hikø, Perhorn, Grendl". The winner column is one name
+-- wide and the row is not worth widening for a list that is on its tooltip
+-- anyway, so the column says who is first in line and how many are behind.
+local function ShortReserve(res)
+    local first, rest = res:match("^%s*([^,]+)%s*,%s*(.+)$")
+    if not first then return (res:gsub("%s+$", "")) end
+    local more = 1
+    for _ in rest:gmatch(",") do more = more + 1 end
+    return ("%s +%d"):format((first:gsub("%s+$", "")), more)
+end
+
 -- Returns the list, and how many rows this tab holds that the quality slider
 -- is hiding, so the header can own up to them.
 local function ViewEntries()
@@ -2160,6 +2311,10 @@ local function BuildTracker()
             if not self.link then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetHyperlink(self.link)
+            if self.res then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Reserved by: " .. self.res, 1, 0.82, 0, true)
+            end
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2237,7 +2392,7 @@ function RefreshTracker()
     for i, row in ipairs(tracker.rows) do
         local e = (i <= shown) and entries[offset + i] or nil   -- already in draw order
         if e then
-            row.link = e.link
+            row.link, row.res = e.link, e.res
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r") or e.link)
             if tracker.view == "mine" then
@@ -2246,12 +2401,14 @@ function RefreshTracker()
                 row.who:SetText("|cffffff00" .. e.winner .. "|r")
             elseif e.stack then
                 row.who:SetText("|cff808080stacked|r")
+            elseif e.res then
+                row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
                 row.who:SetText("|cff808080nobody|r")
             end
             row:Show()
         else
-            row.link = nil
+            row.link, row.res = nil, nil
             row:Hide()
         end
     end
@@ -2436,15 +2593,19 @@ function RefreshRollWindow()
     for i, row in ipairs(rollWin.recent) do
         local e = (i <= shown) and recent[offset + i] or nil
         if e then
-            row.link = e.link
+            row.link, row.res = e.link, e.res
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
-            row.who:SetText("|cff808080"
-                .. (e.winner or (e.stack and "stacked") or "nobody") .. "|r")
+            if not e.winner and not e.stack and e.res then
+                row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
+            else
+                row.who:SetText("|cff808080"
+                    .. (e.winner or (e.stack and "stacked") or "nobody") .. "|r")
+            end
             row:Show()
         else
-            row.link = nil
+            row.link, row.res = nil, nil
             row:Hide()
         end
     end
@@ -2811,6 +2972,10 @@ local function BuildRollWindow()
             if not self.link then return end
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
             GameTooltip:SetHyperlink(self.link)
+            if self.res then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Reserved by: " .. self.res, 1, 0.82, 0, true)
+            end
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2922,6 +3087,12 @@ f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 f:RegisterEvent("CHAT_MSG_LOOT")
 f:RegisterEvent("CHAT_MSG_MONEY")
+-- Where a loot addon announces what the master looter is holding. Party and
+-- instance chat as well as raid, because a five-man can run master loot too.
+for _, ch in ipairs({ "RAID", "RAID_LEADER", "RAID_WARNING", "PARTY", "PARTY_LEADER",
+                      "INSTANCE_CHAT", "INSTANCE_CHAT_LEADER" }) do
+    f:RegisterEvent("CHAT_MSG_" .. ch)
+end
 
 f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" then
@@ -3014,6 +3185,11 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     elseif event == "CHAT_MSG_MONEY" then
         LogMoney(MoneyFromText(arg1 or ""))
+
+    elseif event:find("^CHAT_MSG_RAID") or event:find("^CHAT_MSG_PARTY")
+        or event:find("^CHAT_MSG_INSTANCE_CHAT") then
+        local link, reserves = ParseAnnouncement(arg1 or "")
+        if link or reserves then LogAnnounced(link, reserves) end
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         PruneToGroup()
