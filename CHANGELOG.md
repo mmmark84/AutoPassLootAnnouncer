@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.7.1] - 2026-09-08
+
+### Changed
+- A stacked row says who took the stack rather than "stacked". The log already
+  recorded who took how many, so a stack that went to one person now reads as
+  that many with their name on it, and one split between people becomes a line
+  each -- two to you, one to somebody else -- instead of a single total that
+  says nothing about where it went. Rows logged before those per-winner counts
+  existed have no answer to give and still read "stacked".
+- Both windows split a stack the same way, so the drop log's Everything tab and
+  the loot window agree about where a stack went. The Mine tab already answered
+  per character and is unchanged.
+
+### Fixed
+- Five locals that shadowed an upvalue of the same name, which had no effect on
+  what the addon did but made the lines around them read as though it might.
+
 ## [1.7.0] - 2026-09-07
 
 ### Added

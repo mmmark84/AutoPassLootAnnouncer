@@ -1974,6 +1974,31 @@ local function EntryQuality(e)
     return e.q
 end
 
+-- A stacked row records who took how many, so it can be drawn as one line per
+-- winner rather than a single "stacked" that says nothing about where the
+-- stack went. One winner is the common case and stays one line, with the name
+-- on it and the whole count. Rows logged before the per-winner counts existed
+-- have no answer to give and keep saying "stacked".
+local function SplitStack(e, out)
+    local names = {}
+    for who in pairs(e.by or {}) do names[#names + 1] = who end
+    if #names == 0 then
+        out[#out + 1] = e
+        return out
+    end
+    -- biggest share first, and by name where two shares are equal, so the
+    -- order does not shuffle between redraws the way pairs() would
+    table.sort(names, function(a, b)
+        if e.by[a] ~= e.by[b] then return e.by[a] > e.by[b] end
+        return a < b
+    end)
+    for _, who in ipairs(names) do
+        out[#out + 1] = { id = e.id, link = e.link, count = e.by[who], stack = true,
+                          winner = who, q = EntryQuality(e), t = e.t }
+    end
+    return out
+end
+
 -- Returns the list, and how many rows this tab holds that the quality slider
 -- is hiding, so the header can own up to them.
 local function ViewEntries()
@@ -2001,7 +2026,7 @@ local function ViewEntries()
                 stacks[#stacks + 1] = { id = e.id, link = e.link, count = n,
                                         stack = true, q = e.q, t = e.t }
             elseif e.stack then
-                stacks[#stacks + 1] = e
+                SplitStack(e, stacks)
             else
                 singles[#singles + 1] = e
             end
@@ -2217,10 +2242,10 @@ function RefreshTracker()
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r") or e.link)
             if tracker.view == "mine" then
                 row.who:SetText(e.stack and "|cff808080your share|r" or "|cff808080yours|r")
-            elseif e.stack then
-                row.who:SetText("|cff808080stacked|r")
             elseif e.winner then
                 row.who:SetText("|cffffff00" .. e.winner .. "|r")
+            elseif e.stack then
+                row.who:SetText("|cff808080stacked|r")
             else
                 row.who:SetText("|cff808080nobody|r")
             end
@@ -2338,9 +2363,12 @@ local function RecentEntries()
         local e = all[i]
         local stillRolling = waiting[e.id] and not e.winner and not e.stack
         if not stillRolling and EntryQuality(e) >= (db.trackMin or 0) then
-            out[#out + 1] = e
+            -- a stack split per winner can push the list past the cap, so the
+            -- trim happens after rather than the count being guessed before
+            if e.stack then SplitStack(e, out) else out[#out + 1] = e end
         end
     end
+    while #out > MAX_ROLL_RECENT do out[#out] = nil end
     return out
 end
 
@@ -2412,8 +2440,8 @@ function RefreshRollWindow()
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
-            row.who:SetText("|cff808080" .. (e.stack and "stacked" or (e.winner or "nobody"))
-                .. "|r")
+            row.who:SetText("|cff808080"
+                .. (e.winner or (e.stack and "stacked") or "nobody") .. "|r")
             row:Show()
         else
             row.link = nil
