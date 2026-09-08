@@ -5,9 +5,13 @@
 ### Added
 - A fade time for the loot popup: how long it stays on screen after the last
   thing dropped. "I want to see what dropped, I don't want that window on
-  screen all night" is the request, and on 5 seconds and up the window is off
-  screen between drops and comes back for each one. **Stays up** is still the
-  default and still what it has always done.
+  screen all night" is the request, and on 5 seconds and up the window works a
+  pack at a time -- it comes up on a drop, fills with whatever else that pack
+  drops, and goes when they stop. **Stays up** is still the default and still
+  what it has always done.
+- It is emptied when it goes, so the next pull opens on a clean window rather
+  than on the tail of the last one. The drop log keeps all of it either way:
+  the wipe is what the popup is showing, not what was recorded.
 - It is the same window either way -- same place, same size, same menu, same
   right-click threshold -- rather than a second popup with its own look, so
   there is one thing to configure and interface mods have nothing new to
@@ -23,7 +27,16 @@
 - Fade is deliberately a separate control from grace rather than more steps on
   the Popup button: grace is how long a roll waits, fade is how long the window
   does, and folding two axes into one cycle button would have made six steps
-  into twenty-four.
+  into twenty-four. They compose rather than fight -- a 5-second fade under a
+  10-second grace still leaves the full ten to click a row and take the roll
+  back.
+- "Hide in combat", on the window's right-click menu or `/apla combat`, keeps
+  the popup off screen while you are fighting. What drops meanwhile is still
+  collected and the window shows the lot the moment you leave combat, so the
+  pack's haul arrives in one go once there is time to read it. A roll counting
+  down is the exception and still appears: it has a deadline and a click that
+  takes it back, and hiding that is losing the feature rather than tidying the
+  screen.
 
 ## [1.7.2] - 2026-09-08
 

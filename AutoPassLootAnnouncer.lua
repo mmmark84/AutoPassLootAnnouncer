@@ -35,6 +35,7 @@ local defaults = {
     hud          = false,  -- the loot popup: say what dropped as it drops
     grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
     linger       = 0,      -- seconds the popup stays up after a drop, 0 = stays up
+    hideCombat   = false,  -- keep the popup off screen while you are fighting
     track        = false,  -- keep a log of what dropped; off until you ask for it
     trackMin     = 2,      -- log uncommon and better
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
@@ -53,7 +54,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "linger",
+    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "linger", "hideCombat",
     "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -563,6 +564,7 @@ local function EncodePreset(name, v)
         ("h=%d"):format(v.hud and 1 or 0),
         ("g=%d"):format(tonumber(v.grace) or defaults.grace),
         ("f=%d"):format(tonumber(v.linger) or defaults.linger),
+        ("hc=%d"):format(v.hideCombat and 1 or 0),
         ("bop=%s"):format(EncodeActions(v.actionsBoP)),
         ("boe=%s"):format(EncodeActions(v.actionsBoE)),
         ("bes=%s"):format(EncodeActions(v.actionsBoEStack)),
@@ -611,6 +613,7 @@ local function DecodePreset(code)
         hud        = flag("h", defaults.hud),
         grace      = num("g", 0, 60, defaults.grace),
         linger     = num("f", 0, 60, defaults.linger),
+        hideCombat = flag("hc", defaults.hideCombat),
         prefix     = f.p and Unesc(f.p) or defaults.prefix,
         actionsBoP      = DecodeActions(f.bop or ""),
         actionsBoE      = DecodeActions(f.boe or ""),
@@ -1030,14 +1033,17 @@ end
 -- gaining its winner redrew the log window and not the loot window: the loot
 -- window sat on "nobody" until some later drop happened to leave through the
 -- bottom of the function. So there is one way to say the log changed.
--- `quality` is what the row that changed was logged at, and nil means the log
--- was emptied rather than added to. It decides whether this is worth putting a
--- faded-out popup back on screen for: the same threshold the window filters on,
--- so setting it to Rare keeps a trash pull from popping it up all night.
-local function LootChanged(quality)
+-- `entry` is the row that changed, and nil means the log was emptied rather
+-- than added to. The popup needs the row itself and not just the news: with a
+-- fade time set it shows what has dropped since it came up rather than the
+-- whole log, so waking it is also how a row joins that list.
+--
+-- Wake first and draw second, so the row is in the list by the time it is
+-- drawn.
+local function LootChanged(entry)
     RefreshTracker()
+    WakeRollWindow(entry)
     RefreshRollWindow()
-    if quality and quality >= (db.trackMin or 0) then WakeRollWindow() end
 end
 
 -- winner nil means "this dropped, nobody has won it yet"
@@ -1075,7 +1081,7 @@ function LogDrop(link, count, winner)
                 -- winner and that name is already on it.
                 e.by = e.by or {}
                 e.by[winner] = (e.by[winner] or 0) + count
-                LootChanged(quality)
+                LootChanged(e)
                 return
             end
         end
@@ -1089,7 +1095,7 @@ function LogDrop(link, count, winner)
                 and (time() - e.t)
                     <= (e.announced and ANNOUNCED_MATCH_WINDOW or LOOT_MATCH_WINDOW) then
                 e.winner = winner
-                LootChanged(quality)
+                LootChanged(e)
                 return
             end
         end
@@ -1102,7 +1108,7 @@ function LogDrop(link, count, winner)
     db.loot.started = db.loot.started or time()
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
     Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
-    LootChanged(quality)
+    LootChanged(entries[#entries])
 end
 
 ----------------------------------------------------------------
@@ -1173,7 +1179,7 @@ function LogAnnounced(link, reserves)
         if reserves and lastAnnounced
             and (time() - lastAnnouncedAt) <= ANNOUNCE_PAIR_WINDOW then
             lastAnnounced.res = reserves
-            LootChanged(lastAnnounced.q)
+            LootChanged(lastAnnounced)
         end
         return
     end
@@ -1192,7 +1198,7 @@ function LogAnnounced(link, reserves)
             and (time() - e.t) <= LOOT_MATCH_WINDOW then
             if reserves then e.res = reserves end
             lastAnnounced, lastAnnouncedAt = e, time()
-            LootChanged(e.q)
+            LootChanged(e)
             return
         end
     end
@@ -1205,7 +1211,7 @@ function LogAnnounced(link, reserves)
     db.loot.started = db.loot.started or time()
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
     Dbg("announced %s res=%s", tostring(link), tostring(reserves))
-    LootChanged(e.q)
+    LootChanged(e)
 end
 
 function LogMoney(copper)
@@ -2095,14 +2101,19 @@ local function BuildPanel()
     end)
     AttachTooltip(panel.fade, "Popup fade", {
         "How long the loot popup stays on screen after the last thing dropped. Click to cycle.",
-        "|cffffd100Stays up|r - the window is there all the time, which is what it has always "
-            .. "done.",
-        "|cffffd1005s and up|r - it is off screen between drops and comes back for each one, "
-            .. "then fades again. What dropped without you having a window in the way all night.",
+        "|cffffd100Stays up|r - the window is there all the time, listing the session, which is "
+            .. "what it has always done.",
+        "|cffffd1005s and up|r - it comes up on a drop, fills with whatever else that pack "
+            .. "drops, and goes again once they stop. Each drop puts the clock back to the full "
+            .. "wait.",
+        "It is |cffffd100emptied|r when it goes, so the next pull opens on a clean window rather "
+            .. "than on the tail of the last one. The drop log keeps all of it either way.",
         "A roll still counting down keeps it up however short this is, and so does resting the "
             .. "mouse on it: it never fades out from under a decision.",
         "It only comes back for drops the |cffffd100Show|r threshold lets through, so set that "
             .. "to Rare and a trash pull will not keep waking it.",
+        "|cffffd100Hide in combat|r, on the window's right-click menu, keeps it off screen while "
+            .. "you are fighting and shows what dropped the moment you are not.",
     })
 
     local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
@@ -2557,7 +2568,11 @@ end
 -- The drop log's newest rows rather than a second list of its own, so the
 -- quality slider in the log window filters this too and there is only ever one
 -- list to keep straight.
-local function RecentEntries()
+-- `only` is the set of rows to keep, or nil for the lot. With a fade time set
+-- the window is a picture of this pack rather than of the night: it comes up
+-- empty, fills while things are dropping, and is wiped when it fades, so the
+-- next pull starts from nothing instead of scrolling a night of trash.
+local function RecentEntries(only)
     -- START_LOOT_ROLL puts a winner-less row in the log for the same drop that
     -- is sitting in the pending list above, and one item on two lines of a
     -- small window is noise. Skipped until it has a winner, at which point it
@@ -2572,7 +2587,8 @@ local function RecentEntries()
         if #out >= MAX_ROLL_RECENT then break end
         local e = all[i]
         local stillRolling = waiting[e.id] and not e.winner and not e.stack
-        if not stillRolling and EntryQuality(e) >= (db.trackMin or 0) then
+        if not stillRolling and (not only or only[e])
+            and EntryQuality(e) >= (db.trackMin or 0) then
             -- a stack split per winner can push the list past the cap, so the
             -- trim happens after rather than the count being guessed before
             if e.stack then SplitStack(e, out) else out[#out + 1] = e end
@@ -2601,12 +2617,29 @@ end
 -- the log brings it back, and it goes again once nothing has happened for that
 -- long. Nothing else about it changes -- same window, same place, same size,
 -- same menu -- so there is one popup to configure rather than two.
-local FADE_TIME  = 0.5   -- seconds of actual fading, once the wait is over
-local fadeQueued = false
-local FadeTick           -- recursive: it re-arms itself until it is time
+-- The fade's own state and questions live on one table rather than on five
+-- file-locals: this chunk is at Lua's limit of 200 of those, which is the same
+-- reason WakeRollWindow below is a global.
+local fade = {
+    TIME   = 0.5,     -- seconds of actual fading, once the wait is over
+    queued = false,   -- a tick is already scheduled
+}
 
-FadeTick = function()
-    fadeQueued = false
+-- Is the popup the kind that comes and goes?
+function fade.on()
+    return (tonumber(db.linger) or 0) > 0
+end
+
+-- "Not while I am fighting." A roll counting down is the exception: it has a
+-- deadline and a click that takes it back, so hiding it is losing the feature
+-- rather than tidying the screen. A drop is only news.
+function fade.hiddenByCombat()
+    if not db.hideCombat or not InCombatLockdown() then return false end
+    return next(pendingRolls) == nil
+end
+
+function fade.tick()
+    fade.queued = false
     if not rollWin or not rollWin:IsShown() then return end
 
     local at = rollWin.fadeAt
@@ -2622,33 +2655,60 @@ FadeTick = function()
 
     local left = at - GetTime()
     if left > 0.05 then
-        fadeQueued = true
+        fade.queued = true
         -- capped, so letting go of the mouse is noticed within the second
         -- rather than after another full wait
-        C_Timer.After(math.min(left, 1), FadeTick)
+        C_Timer.After(math.min(left, 1), fade.tick)
         return
     end
 
     rollWin.fadeAt = nil
+
+    -- Gone means gone: the next pull opens on an empty window rather than on
+    -- the tail of this one. The drop log keeps all of it either way -- this
+    -- wipes what the popup is showing, not what was logged.
+    local function Gone()
+        rollWin:Hide()
+        rollWin:SetAlpha(1)
+        rollWin.burst = nil
+        RefreshRollWindow()
+    end
+
     if UIFrameFadeOut then
-        UIFrameFadeOut(rollWin, FADE_TIME, rollWin:GetAlpha(), 0)
-        C_Timer.After(FADE_TIME, function()
+        UIFrameFadeOut(rollWin, fade.TIME, rollWin:GetAlpha(), 0)
+        C_Timer.After(fade.TIME, function()
             -- a drop during the fade sets fadeAt again and cancels it, so this
             -- only finishes the job if nothing has
-            if rollWin and not rollWin.fadeAt then
-                rollWin:Hide()
-                rollWin:SetAlpha(1)
-            end
+            if rollWin and not rollWin.fadeAt then Gone() end
         end)
     else
-        rollWin:Hide()
+        Gone()
     end
 end
 
--- Something new worth looking at. With no fade time this does nothing the
--- window was not already doing; with one, this is what puts it back on screen.
-function WakeRollWindow()
+-- Something new worth looking at. `entry` is the log row it happened to, and
+-- `force` brings the window up without one: a roll appearing, or combat ending
+-- on a backlog. With no fade time this only files the row; with one, this is
+-- what puts the window back on screen and restarts the clock.
+function WakeRollWindow(entry, force)
     if not rollWin or not db.hud then return end
+
+    if entry then
+        -- The same threshold the window filters on, so a trash pull does not
+        -- keep waking it while the epics still do.
+        local q = entry.q or QualityOf(entry.link) or 0
+        if q < (db.trackMin or 0) then return end
+        -- Filed even while it is off screen, so what dropped in combat is
+        -- there to show the moment the fight ends.
+        if fade.on() then
+            rollWin.burst = rollWin.burst or {}
+            rollWin.burst[entry] = true
+        end
+    elseif not force then
+        return
+    end
+
+    if fade.hiddenByCombat() then return end
 
     local linger = tonumber(db.linger) or 0
     if linger <= 0 then return end   -- it never left
@@ -2658,9 +2718,9 @@ function WakeRollWindow()
     rollWin.fadeAt = GetTime() + linger
     rollWin:Show()
 
-    if not fadeQueued then
-        fadeQueued = true
-        C_Timer.After(math.min(linger, 1), FadeTick)
+    if not fade.queued then
+        fade.queued = true
+        C_Timer.After(math.min(linger, 1), fade.tick)
     end
 end
 
@@ -2674,16 +2734,27 @@ function FadeSettingChanged()
         rollWin:SetAlpha(1)
         RefreshRollWindow()
     else
-        WakeRollWindow()
+        -- Turning it on with the window up: what is on it stays on it and
+        -- becomes the first thing to fade, rather than the window blanking the
+        -- moment you choose a time.
+        if not rollWin.burst then
+            rollWin.burst = {}
+            for _, e in ipairs(db.loot.entries) do rollWin.burst[e] = true end
+        end
+        WakeRollWindow(nil, true)
     end
 end
 
 function RefreshRollWindow()
     if not rollWin then return end
     if not db.hud then rollWin:Hide(); return end
+    if fade.hiddenByCombat() then rollWin:Hide(); return end
 
-    local rolls  = SortedPending()
-    local recent = RecentEntries()
+    local rolls = SortedPending()
+    -- Stays-up mode is the whole list, as it always was; a fade time makes it
+    -- what has dropped since the window came up, and nothing at all once it
+    -- has been wiped.
+    local recent = RecentEntries(fade.on() and (rollWin.burst or {}) or nil)
     local now    = GetTime()
 
     -- However many are pending, only as many as there is window for. The ones
@@ -2763,7 +2834,7 @@ function RefreshRollWindow()
     -- A redraw is not news. With a fade time set, the window comes up when
     -- something happens -- WakeRollWindow -- or when there is a roll counting
     -- down on it, and otherwise stays where it was.
-    if (tonumber(db.linger) or 0) <= 0 or npend > 0 or rollWin:IsShown() then
+    if not fade.on() or npend > 0 or rollWin:IsShown() then
         rollWin:Show()
     end
 end
@@ -2816,8 +2887,8 @@ function AddPendingRoll(rollID, action, link, grace)
     suppressed[rollID] = true
     HideDefaultFrame(rollID)
     C_Timer.After(grace, function() FirePending(rollID) end)
+    WakeRollWindow(nil, true)
     RefreshRollWindow()
-    WakeRollWindow()
 end
 
 -- A roll that ends for any other reason: somebody else's action, the master
@@ -2869,6 +2940,15 @@ local function RollMenuInit(_, level)
             RefreshTracker()
             RefreshRollWindow()
             if panel and panel:IsShown() then RefreshPanel() end
+        end,
+    })
+
+    Add({
+        text = "Hide in combat",
+        checked = db.hideCombat and true or false,
+        func = function()
+            db.hideCombat = not db.hideCombat
+            RefreshRollWindow()
         end,
     })
 
@@ -3246,6 +3326,8 @@ f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 f:RegisterEvent("CHAT_MSG_LOOT")
 f:RegisterEvent("CHAT_MSG_MONEY")
+f:RegisterEvent("PLAYER_REGEN_DISABLED")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
 -- Where a loot addon announces what the master looter is holding. Party and
 -- instance chat as well as raid, because a five-man can run master loot too.
 for _, ch in ipairs({ "RAID", "RAID_LEADER", "RAID_WARNING", "PARTY", "PARTY_LEADER",
@@ -3344,6 +3426,17 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     elseif event == "CHAT_MSG_MONEY" then
         LogMoney(MoneyFromText(arg1 or ""))
+
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        RefreshRollWindow()   -- which takes the window off screen, if that is the setting
+
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Out of combat: here is what dropped while you were in it. Only if
+        -- there is something, or every pull would end with an empty window.
+        if rollWin and ((rollWin.burst and next(rollWin.burst)) or next(pendingRolls)) then
+            WakeRollWindow(nil, true)
+        end
+        RefreshRollWindow()
 
     elseif event:find("^CHAT_MSG_RAID") or event:find("^CHAT_MSG_PARTY")
         or event:find("^CHAT_MSG_INSTANCE_CHAT") then
@@ -3579,6 +3672,11 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         else
             print("|cff66ccffAPLA|r /apla fade <0-60>, seconds; 0 leaves the popup up")
         end
+    elseif cmd == "combat" then
+        db.hideCombat = not db.hideCombat
+        print("|cff66ccffAPLA|r loot popup in combat: "
+            .. (db.hideCombat and "hidden" or "shown"))
+        RefreshRollWindow()
     elseif cmd == "track" then
         db.track = not db.track
         print("|cff66ccffAPLA|r drop tracking: " .. tostring(db.track))

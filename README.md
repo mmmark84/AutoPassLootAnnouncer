@@ -222,13 +222,20 @@ Both settings are part of a preset, so a raid preset can run the window off and 
 
 #### Not having it on screen all night
 
-**Fade** is how long the popup stays up after the last thing dropped, and it is a separate question from grace: grace is how long a *roll* waits, fade is how long the *window* does. On **Stays up** it behaves as it always has. On 5 seconds and up it is off screen between drops and comes back for each one, so you see what dropped without a window sitting over your game all night.
+**Fade** is how long the popup stays up after the last thing dropped, and it is a separate question from grace: grace is how long a *roll* waits, fade is how long the *window* does. On **Stays up** it behaves as it always has, listing the session. On 5 seconds and up it works per pack:
 
-It is the same window either way — same place, same size, same menu — so there is one popup to configure rather than two, and interface mods have nothing new to reskin.
+1. Something drops and the window comes up with it.
+2. Whatever else that pack drops joins it, each one putting the clock back to the full wait.
+3. The drops stop, the wait runs out, and it fades.
+4. It is **emptied** on the way out, so the next pull opens on a clean window rather than on the tail of the last one.
 
-Two things keep it up regardless: a **roll still counting down**, because a window that fades out from under a decision is worse than no window, and the **mouse resting on it**, because you are reading it. It only comes back for drops the **Show** threshold lets through, so set that to Rare and a trash pull will not keep waking it.
+The drop log keeps all of it either way — the wipe is what the popup is showing, not what was recorded. It is also the same window in both modes, same place, same size, same menu, so there is one popup to configure rather than two and interface mods have nothing new to reskin.
 
-Set it from the loot window's right-click menu, from the **Fade** button on the settings panel, or with `/apla fade <0-60>`. It is part of a preset like the rest.
+Two things keep it up regardless of how short the fade is: a **roll still counting down**, because a window that fades out from under a decision is worse than no window, and the **mouse resting on it**, because you are reading it. So a 5-second fade with a 10-second grace still gives you the full ten to click a row and take that roll back. It only comes back for drops the **Show** threshold lets through, so set that to Rare and a trash pull will not keep waking it.
+
+**Hide in combat**, on the window's right-click menu, keeps it off screen while you are fighting. What drops in the meantime is still collected, and the window shows the lot the moment you leave combat — the pack's haul in one go, once there is time to read it. A roll counting down is the exception and still appears: it has a deadline and a click that takes it back, and hiding that is losing the feature rather than tidying the screen.
+
+Set the fade from the loot window's right-click menu, from the **Fade** button on the settings panel, or with `/apla fade <0-60>`; combat hiding from that menu or `/apla combat`. Both are part of a preset like the rest.
 
 #### Trying it out
 
@@ -314,6 +321,7 @@ this one and nothing breaks without it.
 | `/apla loot` | Open or close the drop log |
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
 | `/apla fade <0-60>` | Seconds the loot window stays up after a drop; 0 leaves it up |
+| `/apla combat` | Toggle keeping the loot window off screen while you are fighting |
 | `/apla popup` | Open or close the loot window (`/apla roll` also works) |
 | `/apla track` | Toggle drop tracking |
 | `/apla pepe` | Toggle pepe mode |
