@@ -22,6 +22,8 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 ![Options panel](Media/screenshots/options-panel.png)
 
+![Loot window](Media/screenshots/loot-window.png)
+
 ## Usage
 
 Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click opens the drop log.
@@ -35,6 +37,8 @@ Armed is never carried between sessions. What happens at login is the **At login
 | Ask | A prompt each login, so it is never armed without you saying so |
 
 **At login is an account setting, not part of a preset** — it is a question about this session rather than about a role, and on **Ask** the prompt is where you pick the role anyway. That prompt carries a preset dropdown, already set to the one you were last using: pick a different one and it switches there and then, whether or not you go on to arm. **Leave it off** and Escape both mean disarmed.
+
+![The prompt on Ask](Media/screenshots/login-prompt.png)
 
 | | |
 | --- | --- |
@@ -151,6 +155,8 @@ Off by default. **Popup** at the bottom of the options panel cycles through the 
 | Drops only | A window lists what dropped and who took it, as it happens. Rolls are still answered straight away |
 | 3s / 5s / 8s / 12s | Also holds each roll the addon is going to answer for that long, counting down, so you can take one back |
 
+![A roll held with its grace period running](Media/screenshots/loot-window.png)
+
 **Once it is on, it stays on screen.** It does not appear and vanish — a window that comes and goes is one you cannot find, aim at, or resize. Turning it off is how you get rid of it, and the **X** in its header does exactly that.
 
 ```
@@ -265,6 +271,8 @@ Two settings: **Announce** sets the minimum quality, **Announce up to** sets the
 Pepe mode prepends a random happy pepe to each announcement, picked from 22 of
 the cheerful ones in [Twitch Emotes 2.0](https://www.curseforge.com/wow/addons/twitch-emotes-v2).
 It never repeats the emote it used last.
+
+![A pepe on an announcement](Media/screenshots/loot-pepe.png)
 
 They are all still frames. Twitch Emotes animates an emote by rewriting the
 whole chat line 30 times a second, which stops an item tooltip on that line
