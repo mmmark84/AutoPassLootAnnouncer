@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.7.3] - 2026-09-08
+
+### Added
+- A fade time for the loot popup: how long it stays on screen after the last
+  thing dropped. "I want to see what dropped, I don't want that window on
+  screen all night" is the request, and on 5 seconds and up the window is off
+  screen between drops and comes back for each one. **Stays up** is still the
+  default and still what it has always done.
+- It is the same window either way -- same place, same size, same menu, same
+  right-click threshold -- rather than a second popup with its own look, so
+  there is one thing to configure and interface mods have nothing new to
+  reskin.
+- A roll still counting down keeps it up however short the fade is, and so does
+  resting the mouse on it. A window that fades out from under a decision is
+  worse than no window at all.
+- It only comes back for drops the window's own quality threshold lets through,
+  so a trash pull does not keep waking it while the epics still do.
+- Set it from the loot window's right-click menu, the Fade button on the
+  settings panel, or `/apla fade <0-60>`. It is part of a preset, so a raid
+  preset can leave the window up and a five-man preset let it fade.
+- Fade is deliberately a separate control from grace rather than more steps on
+  the Popup button: grace is how long a roll waits, fade is how long the window
+  does, and folding two axes into one cycle button would have made six steps
+  into twenty-four.
+
 ## [1.7.2] - 2026-09-08
 
 ### Added

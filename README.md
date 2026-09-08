@@ -220,6 +220,16 @@ Blizzard's window is only held back for rolls the addon has taken responsibility
 
 Both settings are part of a preset, so a raid preset can run the window off and a five-man preset at 8 seconds. `/apla grace <0-60>` sets the hold and turns the window on with it; `/apla popup` toggles the window and takes the hold down with it, because a roll held back with nowhere to see it is worse than either setting alone.
 
+#### Not having it on screen all night
+
+**Fade** is how long the popup stays up after the last thing dropped, and it is a separate question from grace: grace is how long a *roll* waits, fade is how long the *window* does. On **Stays up** it behaves as it always has. On 5 seconds and up it is off screen between drops and comes back for each one, so you see what dropped without a window sitting over your game all night.
+
+It is the same window either way — same place, same size, same menu — so there is one popup to configure rather than two, and interface mods have nothing new to reskin.
+
+Two things keep it up regardless: a **roll still counting down**, because a window that fades out from under a decision is worse than no window, and the **mouse resting on it**, because you are reading it. It only comes back for drops the **Show** threshold lets through, so set that to Rare and a trash pull will not keep waking it.
+
+Set it from the loot window's right-click menu, from the **Fade** button on the settings panel, or with `/apla fade <0-60>`. It is part of a preset like the rest.
+
 #### Trying it out
 
 Group loot rolls only happen in a group, on Group Loot or Need Before Greed — solo, nothing is ever rolled for, so the pending half of this cannot be tested alone. **Drops only can**: turn on Track drops, set Popup to Drops only, and kill something.
@@ -303,6 +313,7 @@ this one and nothing breaks without it.
 | `/apla login <off\|on\|ask>` | What automated rolling does at login |
 | `/apla loot` | Open or close the drop log |
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
+| `/apla fade <0-60>` | Seconds the loot window stays up after a drop; 0 leaves it up |
 | `/apla popup` | Open or close the loot window (`/apla roll` also works) |
 | `/apla track` | Toggle drop tracking |
 | `/apla pepe` | Toggle pepe mode |
