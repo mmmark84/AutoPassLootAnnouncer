@@ -1,0 +1,128 @@
+<!--
+  Paste-ready body for the CurseForge Description tab. Paste into the source
+  view, not the rich-text box.
+
+  The images are the uploads on the project's Media tab, served from
+  CurseForge's own CDN because an <img> pointing anywhere else is stripped.
+  Replacing a screenshot means uploading it there and putting the new address
+  here. Descriptions are sanitised, so no class, id or style attributes
+  survive -- keep to the plain tags used here.
+-->
+
+<h2>Announces group loot drops the moment they drop, and rolls need, greed or pass for you.</h2>
+
+<p>Built for raids where everyone is asked to pass on loot. Blizzard's <strong>Pass on Loot</strong> option is server side: with it on, the server never sends you the roll, so you never find out what dropped until people start looting. This addon replaces that option with automated passing you can actually see.</p>
+
+<p><img src="https://media.forgecdn.net/attachments/1928/556/chat-output-png.png" alt="Chat output"></p>
+
+<h3>Features</h3>
+
+<ul>
+  <li><strong>Announces on the roll</strong>, not on the corpse, so you see drops even when someone else loots the body</li>
+  <li><strong>Roll actions per quality and per kind</strong> &mdash; need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you</li>
+  <li><strong>An optional loot window</strong> that says what dropped as it drops &mdash; movable, resizable, scrollable &mdash; and can hold each roll a few seconds so you get one click to take any of it back</li>
+  <li><strong>Presets</strong> for whole sets of settings, so the night's raid rules and the way you loot a five-man are two clicks apart, with a one-line code to share either</li>
+  <li><strong>Single announcer election</strong> &mdash; when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure</li>
+  <li><strong>Never armed between sessions</strong> &mdash; automated rolling starts each login off, on, or behind a prompt, whichever you pick</li>
+  <li><strong>Drop tracker</strong> &mdash; an optional log of everything that dropped this session and who won it, kept across logouts until you clear it</li>
+  <li><strong>Pepe mode</strong>, which puts a random cheerful pepe in front of every announcement</li>
+</ul>
+
+<p><img src="https://media.forgecdn.net/attachments/1931/996/options-panel-png.png" alt="Options panel"></p>
+
+<h3>Roll actions</h3>
+
+<p>Pick a quality with the tabs, then set what happens to each <strong>kind</strong> of drop at that quality. Quality on its own is a poor guide to whether a drop is worth stopping for &mdash; at epic, all three kinds want different answers:</p>
+
+<table>
+  <thead>
+    <tr><th>Drop</th><th>Kind</th><th>Typical setting</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Tier token, boss gear</td><td>BoP</td><td>Pass</td></tr>
+    <tr><td>Pattern, BoE weapon</td><td>BoE</td><td>Window &mdash; somebody has been waiting for it</td></tr>
+    <tr><td>Epic gem, nether vortex</td><td>BoE stack</td><td>Pass &mdash; it is a commodity</td></tr>
+  </tbody>
+</table>
+
+<p>The four actions are <strong>Window</strong> (nothing happens, the roll window stays up for you), <strong>Pass</strong>, <strong>Greed</strong> (auto-confirms the bind prompt) and <strong>Need</strong>. Uncommon, rare, epic and legendary each get their own three rows. <strong>Poor and common are left alone entirely</strong> &mdash; no auto-roll, the window stays up exactly as it would without the addon running.</p>
+
+<p>Bind type comes from the roll itself, so it is the server's answer for that exact roll. Stackability is the item's maximum stack size, so a single epic gem still reads as stackable. If something has not resolved in time, the roll is left alone rather than guessed at.</p>
+
+<h3>The loot window</h3>
+
+<p>Off by default. The <strong>Popup</strong> button at the bottom of the options panel cycles through it, because the two things people asked for are points on one line, from "tell me nothing" through "tell me" to "tell me and wait for me".</p>
+
+<table>
+  <thead>
+    <tr><th>Popup</th><th>What happens</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Off</td><td>No window. Rolls are answered the moment they drop and Blizzard's roll windows are left alone</td></tr>
+    <tr><td>Drops only</td><td>A window lists what dropped and who took it, as it happens. Rolls are still answered straight away</td></tr>
+    <tr><td>3s / 5s / 8s / 12s</td><td>Also holds each roll the addon is going to answer for that long, counting down, so you can take one back</td></tr>
+  </tbody>
+</table>
+
+<p><img src="https://media.forgecdn.net/attachments/1932/6/loot-window-png.png" alt="A roll held with its grace period running"></p>
+
+<p>Above the line are pending rolls. <strong>The countdown is the row itself</strong>: a band the full width of it, draining away leftwards behind the item name, so how long is left reads from the corner of your eye without the number being read. It warms from green through amber to red as it goes. Below the line, what already happened.</p>
+
+<p>Once it is on it stays on screen, because a window that comes and goes is one you cannot find, aim at or resize. Drag it by the header or the body, resize it from the corner, and right-click anywhere on it for the quality threshold, <strong>Track drops</strong> and <strong>Clear the drop log</strong>. Position and size are both remembered.</p>
+
+<h3>Arming</h3>
+
+<p>Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click opens the drop log.</p>
+
+<p>Armed is never carried between sessions. The <strong>At login</strong> button decides what happens next time: <strong>Off</strong> stays disarmed until you arm it yourself, <strong>On</strong> arms straight away on the preset you were last using, and <strong>Ask</strong> puts a prompt in front of it so it is never armed without you saying so. The prompt carries a preset dropdown, so it is also where you pick the night's role.</p>
+
+<p><img src="https://media.forgecdn.net/attachments/1931/999/login-prompt-png.png" alt="The prompt on Ask"></p>
+
+<h3>Drop tracker</h3>
+
+<p>Off by default. Turn on <strong>Track drops</strong>, then middle-click the minimap button for the log. A session lasts as long as you leave it: the log survives logouts and is emptied only when you say so, so a night of trash runs with a logout in the middle is still one list.</p>
+
+<p>Two tabs, <strong>Everything</strong> and <strong>Mine</strong>. Non-stackables get a row each with the winner's name; stackables collapse to one row with a running total and sort to the top. Hovering a row shows the item tooltip, shift-clicking links it into whatever you are typing, and the header carries the session start and a running coin total.</p>
+
+<p>The slider filters <strong>what you are looking at, not what gets kept</strong>. Everything that drops goes in, greys and quest items included, and the slider decides how far down the list you want to see. Drag it up to pull the night's epics out of a wall of vendor trash, drag it back down and they are all still there.</p>
+
+<h3>Pepe mode</h3>
+
+<p>Prepends a random happy pepe to each announcement, from 22 of the cheerful ones in <a href="https://www.curseforge.com/wow/addons/twitch-emotes-v2">Twitch Emotes 2.0</a>, never repeating the one it used last.</p>
+
+<p><img src="https://media.forgecdn.net/attachments/1931/995/loot-pepe-png.png" alt="A pepe on an announcement"></p>
+
+<p>What goes out on the wire is the emote's name, so it becomes a picture only for readers who run Twitch Emotes themselves &mdash; everyone else sees the word. That addon is not a dependency and nothing breaks without it.</p>
+
+<h3>Slash commands</h3>
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Effect</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>/apla</code></td><td>Open the options panel (<code>/lap</code> also works)</td></tr>
+    <tr><td><code>/apla pass</code></td><td>Arm or disarm automated rolling</td></tr>
+    <tr><td><code>/apla preset &lt;name or number&gt;</code></td><td>Switch preset. <code>/apla preset</code> lists them</td></tr>
+    <tr><td><code>/apla preset code</code></td><td>Open the share-code window</td></tr>
+    <tr><td><code>/apla preset import &lt;code&gt;</code></td><td>Import a code as a new preset</td></tr>
+    <tr><td><code>/apla grace &lt;0-60&gt;</code></td><td>Seconds to hold a roll before answering it</td></tr>
+    <tr><td><code>/apla popup</code></td><td>Open or close the loot window</td></tr>
+    <tr><td><code>/apla loot</code></td><td>Open or close the drop log</td></tr>
+    <tr><td><code>/apla track</code></td><td>Toggle drop tracking</td></tr>
+    <tr><td><code>/apla pepe</code></td><td>Toggle pepe mode</td></tr>
+    <tr><td><code>/apla who</code></td><td>Show the elected announcer and all peers</td></tr>
+  </tbody>
+</table>
+
+<p>The full list, including <code>/apla set</code> for scripting the roll table, is in the <a href="https://github.com/mmmark84/AutoPassLootAnnouncer#slash-commands">README</a>.</p>
+
+<hr>
+
+<h3>Before it can do anything</h3>
+
+<p>For the addon to see rolls at all, Blizzard's own <strong>Pass on Loot</strong> option must be <strong>off</strong> (Interface &rarr; Combat). That option suppresses the roll server side and no addon can work around it.</p>
+
+<p>Group loot rolls only happen in a group, on Group Loot or Need Before Greed. Solo, nothing is ever rolled for &mdash; but <strong>Drops only</strong> works alone, which is the half that answers "show me what I looted".</p>
+
+<p>Built for the Burning Crusade Anniversary client (2.5.6). Settings are per account, not per character. Bug reports and source: <a href="https://github.com/mmmark84/AutoPassLootAnnouncer">github.com/mmmark84/AutoPassLootAnnouncer</a>.</p>
