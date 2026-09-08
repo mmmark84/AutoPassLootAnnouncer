@@ -283,9 +283,20 @@ This is the opposite. It appears when something drops, says what it was, and goe
 
 It has no grace period and no countdown because it has nothing you must answer. Taking a roll back is the loot window's job, and that window stays up precisely because it might need you. Run both if you want both.
 
-**Moving and sizing it.** It has no header — a window this brief cannot spare the room — so it is dragged by its body *and by its rows*, which would otherwise swallow the drag. The grip in its bottom-right corner sets the width; the height is however many rows it is holding, so it grows and shrinks with the pack. Both are remembered per account.
+**Moving and sizing it.** It has no header — a window this brief cannot spare the room — so it is dragged by its body *and by its rows*, which would otherwise swallow the drag. The grip in its bottom-right corner sizes it. Both are remembered per account.
 
-Because it only appears when something drops, there would otherwise be no way to find it to put it anywhere: so **cycling the Drop popup button shows it**, with a placeholder row to aim at. It fades on its own like any other showing.
+The height works two ways, and which one you get depends on where you leave that grip:
+
+| | |
+| --- | --- |
+| **Squashed to one row** | It grows and shrinks with the pack — one drop is one line, five is five |
+| **Pulled down past one row** | It is that height every time, full or not, and anything past it scrolls on the mouse wheel |
+
+One row is the smallest the grip goes, so "as small as it will go" is also how you ask for no fixed height at all. Either way the newest is at the top, so a full window is always showing the thing that just dropped; the wheel goes back through the rest. It holds twenty rows and shows at most ten at once.
+
+Having hold of it — dragging it, or sizing it — keeps it on screen, the same as resting the mouse on it does. A window that faded out from under a resize would be one you could not resize.
+
+Because it only appears when something drops, there would otherwise be no way to find it to put it anywhere: so **cycling the Drop popup button shows it**, with a placeholder row to aim at, and **Test** fakes a whole pull so there is something to size it against. It fades on its own like any other showing.
 
 Right-click to put it away early, shift-click a row to link it in chat. It fades rather than blinking out. The drop log keeps everything either way — the wipe is what the popup is showing, not what was recorded.
 

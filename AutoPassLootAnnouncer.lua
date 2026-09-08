@@ -645,7 +645,9 @@ local pop = {
     MAX_W    = 600,
     ROW_H    = 18,
     PAD      = 5,
-    MAX_ROWS = 10,    -- a pack, not a night
+    MAX_ROWS = 10,    -- rows it can show at once
+    MAX_HELD = 20,    -- rows it will hold to be scrolled back through
+    offset   = 0,     -- how far back through them the wheel has gone
     FADE     = 0.5,   -- the fade itself, once the wait is over
     STEPS    = { 0, 3, 5, 10 },
     rows     = {},
@@ -2133,8 +2135,12 @@ local function BuildPanel()
         "|cffffd100Never in combat.|r What drops while you are fighting is held back and shown "
             .. "the moment you are not, which is the point of it: you read it while the healer "
             .. "drinks, not while you are being hit.",
-        "Drag it by its rows to move it, the corner grip sets the width, right-click puts it "
-            .. "away early and shift-click links a row in chat.",
+        "Drag it by its rows to move it; right-click puts it away early and shift-click links "
+            .. "a row in chat.",
+        "The corner grip sets the size. Pulled |cffffd100down|r past one row it keeps that "
+            .. "height every time, and anything past it scrolls on the mouse wheel, newest at "
+            .. "the top. Squashed back to |cffffd100one row|r it goes back to growing with "
+            .. "whatever dropped.",
         "It only appears for drops the |cffffd100Show|r threshold lets through, which is set on "
             .. "the loot window's right-click menu. |cffffd100Test|r fakes a pull so you can see "
             .. "it and place it.",
@@ -2879,10 +2885,30 @@ function pop.list()
     for i = #pop.burst, 1, -1 do
         local e = pop.burst[i]
         if e.stack then SplitStack(e, out) else out[#out + 1] = e end
-        if #out >= pop.MAX_ROWS then break end
+        if #out >= pop.MAX_HELD then break end
     end
-    while #out > pop.MAX_ROWS do out[#out] = nil end
+    while #out > pop.MAX_HELD do out[#out] = nil end
     return out
+end
+
+-- How many rows are on show, and how far down the list they start.
+--
+-- A height you have set is a height it keeps, whatever is on it: a window that
+-- resizes itself under the cursor is one you cannot read, and the whole point
+-- of setting one is that it stops moving. Everything past it scrolls, newest
+-- first, so a full window is always showing the thing that just dropped.
+--
+-- No height set -- one row, which is as small as the grip goes -- and it grows
+-- with the list instead, which is what it did before there was a choice.
+function pop.shownRows(count)
+    local fixed = tonumber(db.popupRows) or 0
+    local shown
+    if fixed > 1 then
+        shown = math.min(fixed, pop.MAX_ROWS)
+    else
+        shown = math.max(1, math.min(count, pop.MAX_ROWS))
+    end
+    return shown, math.max(0, math.min(pop.offset or 0, count - shown))
 end
 
 function pop.build()
@@ -2898,8 +2924,23 @@ function pop.build()
     f:Hide()
 
     f:SetResizable(true)
+
+    -- Nothing to do until there is more held than shown, which is either a
+    -- height you have set or more than ten things off one pull.
+    local function Wheel(_, delta)
+        local count = #pop.list()
+        local shown = pop.shownRows(count)
+        if count <= shown then return end
+        pop.offset = math.max(0, math.min(count - shown, (pop.offset or 0) - delta))
+        pop.refresh()
+        pop.at = GetTime() + (tonumber(db.popup) or 0)   -- reading it is wanting it
+    end
+    f:EnableMouseWheel(true)
+    f:SetScript("OnMouseWheel", Wheel)
+    pop.wheel = Wheel
+
     f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStart", function() pop.held = true; f:StartMoving() end)
     f:SetScript("OnDragStop", function() pop.savePos() end)
     -- Right-click puts it away now rather than in a few seconds. There is no
     -- menu on it: it is not up long enough to be configured from, and what you
@@ -2931,8 +2972,10 @@ function pop.build()
         -- told to pass on, so each one hands its drag to the window. Without
         -- this there is nowhere to grab: it has no header to spare the room for.
         row:RegisterForDrag("LeftButton")
-        row:SetScript("OnDragStart", function() f:StartMoving() end)
+        row:SetScript("OnDragStart", function() pop.held = true; f:StartMoving() end)
         row:SetScript("OnDragStop", function() pop.savePos() end)
+        row:EnableMouseWheel(true)
+        row:SetScript("OnMouseWheel", pop.wheel)
 
         row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.who:SetPoint("RIGHT", -2, 0)
@@ -2958,29 +3001,41 @@ function pop.build()
         pop.rows[i] = row
     end
 
-    -- Width only. Height is however many rows it is holding, so the bounds are
-    -- pinned to the height it has at the moment you grab the corner and it does
-    -- not stretch under the cursor and snap back on the next drop.
+    -- Drag it down and the height you leave it at is the height it keeps; drag
+    -- it back up to a single row and it goes back to growing with the list.
+    -- One row is the smallest the grip goes, so "as small as it will go" is
+    -- also how you ask for no fixed size at all.
     local grip = CreateFrame("Button", nil, f)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -2, 2)
     grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    local minH = pop.ROW_H + pop.PAD * 2
+    local maxH = pop.MAX_ROWS * pop.ROW_H + pop.PAD * 2
     grip:SetScript("OnMouseDown", function()
-        local h = f:GetHeight()
         if f.SetResizeBounds then
-            f:SetResizeBounds(pop.MIN_W, h, pop.MAX_W, h)
+            f:SetResizeBounds(pop.MIN_W, minH, pop.MAX_W, maxH)
         else
-            f:SetMinResize(pop.MIN_W, h)
-            f:SetMaxResize(pop.MAX_W, h)
+            f:SetMinResize(pop.MIN_W, minH)
+            f:SetMaxResize(pop.MAX_W, maxH)
         end
+        pop.held = true
         f:StartSizing("BOTTOMRIGHT")
     end)
     grip:SetScript("OnMouseUp", function()
+        pop.held = false
         f:StopMovingOrSizing()
         db.popupW = math.floor(f:GetWidth() + 0.5)
+
+        -- Snapped to whole rows: half a row of window is not a size anyone
+        -- meant to ask for.
+        local rows = math.floor((f:GetHeight() - pop.PAD * 2) / pop.ROW_H + 0.5)
+        db.popupRows = rows > 1 and math.min(rows, pop.MAX_ROWS) or nil
+
+        pop.offset = 0
         pop.layout()
+        pop.refresh()
     end)
 
     pop.frame = f
@@ -2990,6 +3045,7 @@ end
 function pop.savePos()
     local f = pop.frame
     if not f then return end
+    pop.held = false
     f:StopMovingOrSizing()
     local point, _, rel, x, y = f:GetPoint()
     db.popupPos = { point = point, rel = rel, x = x, y = y }
@@ -3013,8 +3069,11 @@ function pop.refresh()
     if not pop.frame then return end
 
     local list = pop.list()
+    local shown, offset = pop.shownRows(#list)
+    pop.offset = offset
+
     for i, row in ipairs(pop.rows) do
-        local e = list[i]
+        local e = (i <= shown) and list[offset + i] or nil
         if e then
             -- a made-up row has no item behind it, so it gets no link either,
             -- and brings its own icon since there is nothing to ask
@@ -3037,14 +3096,14 @@ function pop.refresh()
         end
     end
 
-    -- Exactly as tall as it has rows: a popup with empty space in it looks like
-    -- something failed to load.
-    pop.frame:SetHeight(math.max(1, #list) * pop.ROW_H + pop.PAD * 2)
+    pop.frame:SetHeight(shown * pop.ROW_H + pop.PAD * 2)
 end
 
 -- Gone means gone: hidden and wiped, so the next drop starts a fresh one.
 function pop.gone()
     pop.at = nil
+    pop.offset = 0
+    pop.held = false
     for i = #pop.burst, 1, -1 do pop.burst[i] = nil end
     if pop.frame then
         if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(pop.frame) end
@@ -3070,8 +3129,10 @@ function pop.tick()
 
     if InCombatLockdown() then pop.duck(); return end
 
-    -- reading it counts as still wanting it
-    if MouseIsOver and MouseIsOver(f) then
+    -- Reading it counts as still wanting it, and so does having hold of it:
+    -- the cursor wanders off the frame while you drag a corner, and a window
+    -- that fades out from under a resize is a window you cannot resize.
+    if pop.held or (MouseIsOver and MouseIsOver(f)) then
         pop.at = GetTime() + (tonumber(db.popup) or 0)
     end
 
@@ -3169,7 +3230,8 @@ function pop.wake(entry, force)
         end
         if not seen then
             pop.burst[#pop.burst + 1] = entry
-            while #pop.burst > pop.MAX_ROWS do table.remove(pop.burst, 1) end
+            while #pop.burst > pop.MAX_HELD do table.remove(pop.burst, 1) end
+            pop.offset = 0   -- something new: back to the top of the list
         end
     elseif #pop.burst == 0 then
         return

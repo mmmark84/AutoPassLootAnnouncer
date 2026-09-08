@@ -29,6 +29,17 @@
   leave it off.
 
 ### Changed
+- The drop popup's height is yours to set. Pull the corner down past one row
+  and it keeps that height every time it appears, full or not, with anything
+  past it scrolling on the mouse wheel; squash it back to a single row and it
+  goes back to growing with whatever dropped. One row is as small as the grip
+  goes, so "as small as it will go" is also how you ask for no fixed height.
+- Newest is at the top either way, so a window that is full is always showing
+  the thing that just dropped. It holds twenty rows now and shows at most ten,
+  so the wheel has something to go back through.
+- Having hold of the popup keeps it on screen, the same as resting the mouse on
+  it: the cursor wanders off the frame while you drag a corner, and a window
+  that faded out from under a resize would be one you could not resize.
 - The session log window is gone. It was a second place to read the same list,
   and the loot window already lists what dropped, is already where the
   threshold is set, and is already where the log is cleared. Middle-clicking
