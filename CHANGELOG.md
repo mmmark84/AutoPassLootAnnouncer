@@ -3,42 +3,37 @@
 ## [1.7.3] - 2026-09-08
 
 ### Added
-- A fade time for the loot window, which is what turns it into a popup. "I want
-  to see what dropped, I don't want that window on screen all night" is the
-  request, and the two are now different things with different manners: the
-  loot window stays up and lists the session, a popup comes up on a drop, fills
-  with whatever else that pack drops, and goes when they stop. **Stays up** is
-  still the default and still exactly what it has always done.
-- A popup is emptied when it goes, so the next pull opens on a clean window
-  rather than on the tail of the last one. The drop log keeps all of it either
-  way: the wipe is what the popup is showing, not what was recorded.
-- A popup stays out of a fight. Nothing appears while you are in combat and
-  what dropped meanwhile is shown the moment you leave it, so a pack's haul
-  arrives in one go once there is time to read it. With no grace period set it
-  simply goes when the fighting starts; with one, a roll counting down still
-  comes up, because that is the window you click to take it back. None of this
-  is a setting -- it follows from having asked for a fade time, since a window
-  that appears at you mid-pull is the thing a fade time is asking to be rid of.
-- The **X** on a popup dismisses that showing rather than turning the feature
-  off: the next drop brings it back. On the loot window it still turns it off,
-  because that is the thing you turned on. Its right-click menu offers both.
-- A roll still counting down keeps it up however short the fade is, and so does
-  resting the mouse on it. A window that fades out from under a decision is
-  worse than no window at all, so a 3-second fade under a 10-second grace still
-  leaves the full ten to take a roll back.
-- It only comes back for drops the window's own quality threshold lets through,
-  so a trash pull does not keep waking it while the epics still do.
-- Set it from the loot window's right-click menu, the Fade button on the
-  settings panel, or `/apla fade <0-60>`. It is part of a preset, so a raid
-  preset can leave the window up and a five-man preset let it fade.
-- Fade is deliberately a separate control from grace rather than more steps on
-  the same button: grace is how long a roll waits, fade is how long the window
-  does, and folding two axes into one cycle button would have made six steps
-  into twenty-four.
+- A drop popup: a small window that appears when something drops, says what it
+  was, and goes again. Off by default; the **Drop popup** button on the settings
+  panel cycles off, 3, 5 and 10 seconds, and `/apla popup <0-60>` does the same.
+- It is a second window rather than a second mode of the loot window, because
+  the two want opposite manners. The loot window is a fixture: you turn it on,
+  it stays where you put it, and it is where a roll counts down and where you
+  click to take one back. A window you may have to answer is a window that has
+  to stay. This one has nothing to answer, so it can leave.
+- A pack arrives as one window: each drop puts the clock back to the full time,
+  so five things off one pull are five lines rather than five popups.
+- It is emptied when it goes, so the next pull opens on a clean window rather
+  than on the tail of the last one. The drop log keeps all of it -- the wipe is
+  what the popup is showing, not what was recorded.
+- Never on screen in a fight. What drops while you are fighting is held back and
+  shown the moment you are not, which is the point of it: you read it in the
+  quiet after the pull while the healer drinks, not while you are being hit.
+- No grace period and no countdown on it, deliberately. Taking a roll back is
+  the loot window's job and that window stays up precisely because it might
+  need you. Run both if you want both.
+- Drag to move, right-click to put it away early, shift-click a row to link it.
+  Its position is remembered per account, it only appears for drops the Show
+  threshold lets through, and it needs Track drops on since it reads that log.
+- It is part of a preset, so a raid preset can run it and a five-man preset
+  leave it off.
 
 ### Changed
-- The setting is called **Loot window** rather than Popup, because that is what
-  it is until a fade time makes it otherwise. `/apla popup` still works.
+- `/apla window` opens and closes the loot window; `/apla roll` still does too.
+  `/apla popup` now belongs to the popup, which has the better claim on the
+  name.
+- The settings panel calls the first button **Loot window** rather than Popup,
+  now that there is a popup for it to be confused with.
 
 ## [1.7.2] - 2026-09-08
 

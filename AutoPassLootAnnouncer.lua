@@ -34,7 +34,7 @@ local defaults = {
                            -- "ask" the prompt is where you pick the preset anyway.
     hud          = false,  -- the loot window: say what dropped as it drops
     grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
-    linger       = 0,      -- seconds the popup stays up after a drop, 0 = stays up
+    popup        = 0,      -- seconds the drop popup shows for, 0 = no popup
     track        = false,  -- keep a log of what dropped; off until you ask for it
     trackMin     = 2,      -- log uncommon and better
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
@@ -53,7 +53,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "linger",
+    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "popup",
     "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -89,25 +89,6 @@ local HUD_STEPS = {
     { hud = true,  grace = 8  },
     { hud = true,  grace = 12 },
 }
-
--- How long the popup stays up after the last drop. A separate question from
--- grace -- grace is how long a roll waits, this is how long the window does --
--- so it is a control of its own rather than another six steps on that one.
-local FADE_STEPS = { 0, 3, 5, 10 }
-
-local function NextFade(linger)
-    linger = tonumber(linger) or 0
-    for i, step in ipairs(FADE_STEPS) do
-        if step == linger then return FADE_STEPS[i % #FADE_STEPS + 1] end
-    end
-    return 0   -- a time set by slash command to something off the list: back to never
-end
-
-local function FadeLabel(linger)
-    linger = tonumber(linger) or 0
-    if linger <= 0 then return "stays up" end
-    return linger .. "s"
-end
 
 local function NextHud(hud, grace)
     grace = tonumber(grace) or 0
@@ -562,7 +543,7 @@ local function EncodePreset(name, v)
         ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
         ("h=%d"):format(v.hud and 1 or 0),
         ("g=%d"):format(tonumber(v.grace) or defaults.grace),
-        ("f=%d"):format(tonumber(v.linger) or defaults.linger),
+        ("f=%d"):format(tonumber(v.popup) or defaults.popup),
         ("bop=%s"):format(EncodeActions(v.actionsBoP)),
         ("boe=%s"):format(EncodeActions(v.actionsBoE)),
         ("bes=%s"):format(EncodeActions(v.actionsBoEStack)),
@@ -610,7 +591,7 @@ local function DecodePreset(code)
         trackMin   = num("tq", 0, 5, defaults.trackMin),
         hud        = flag("h", defaults.hud),
         grace      = num("g", 0, 60, defaults.grace),
-        linger     = num("f", 0, 60, defaults.linger),
+        popup      = num("f", 0, 60, defaults.popup),
         prefix     = f.p and Unesc(f.p) or defaults.prefix,
         actionsBoP      = DecodeActions(f.bop or ""),
         actionsBoE      = DecodeActions(f.boe or ""),
@@ -650,9 +631,38 @@ local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
 local LogDrop, LogMoney, ClearLog, RefreshTracker, ToggleTracker
 local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
--- WakeRollWindow and FadeSettingChanged are globals rather than joining the
--- line above, for the same reason LogDrop is one: this file is at Lua's limit
--- of 200 locals in a chunk, and two more forward declarations do not fit.
+
+-- The drop popup. Everything it owns hangs off this one table: the drop log
+-- wakes it from a long way above where it is built, and this chunk is at Lua's
+-- limit of 200 locals, so it is one name rather than a dozen. Filled in down in
+-- its own section.
+local pop = {
+    W        = 300,   -- it lists, it is not read across
+    ROW_H    = 18,
+    PAD      = 5,
+    MAX_ROWS = 10,    -- a pack, not a night
+    FADE     = 0.5,   -- the fade itself, once the wait is over
+    STEPS    = { 0, 3, 5, 10 },
+    rows     = {},
+    burst    = {},    -- the rows this showing is about, oldest first
+    queued   = false,
+}
+
+function pop.on() return (tonumber(db.popup) or 0) > 0 end
+
+function pop.label(secs)
+    secs = tonumber(secs) or 0
+    if secs <= 0 then return "off" end
+    return secs .. "s"
+end
+
+function pop.next(secs)
+    secs = tonumber(secs) or 0
+    for i, step in ipairs(pop.STEPS) do
+        if step == secs then return pop.STEPS[i % #pop.STEPS + 1] end
+    end
+    return 0   -- a time set by slash command to something off the list
+end
 
 ----------------------------------------------------------------
 -- Output
@@ -1030,17 +1040,13 @@ end
 -- gaining its winner redrew the log window and not the loot window: the loot
 -- window sat on "nobody" until some later drop happened to leave through the
 -- bottom of the function. So there is one way to say the log changed.
--- `entry` is the row that changed, and nil means the log was emptied rather
--- than added to. The popup needs the row itself and not just the news: with a
--- fade time set it shows what has dropped since it came up rather than the
--- whole log, so waking it is also how a row joins that list.
---
--- Wake first and draw second, so the row is in the list by the time it is
--- drawn.
+-- `entry` is the log row that changed, and nil means the log was emptied
+-- rather than added to. The windows redraw either way; the popup only has
+-- something to appear about when there is a row.
 local function LootChanged(entry)
     RefreshTracker()
-    WakeRollWindow(entry)
     RefreshRollWindow()
+    pop.wake(entry)
 end
 
 -- winner nil means "this dropped, nobody has won it yet"
@@ -1568,8 +1574,8 @@ local PRESET_BAR_H = 34
 
 -- The bar of buttons across the bottom. Without it they sat on top of the
 -- last checkbox, which is what the panel used to end with. Two rows since the
--- popup gained a fade time: the panel is 340 wide and two cycle buttons do not
--- sit beside each other in what is left of that next to Test.
+-- popup became a window of its own: the panel is 340 wide and two cycle
+-- buttons do not sit beside each other in what is left of that next to Test.
 local BOTTOM_BAR_H = 52
 
 local presetCode           -- the share-code window, built alongside the panel
@@ -2077,9 +2083,6 @@ local function BuildPanel()
     AttachTooltip(panel.hud, "Loot window", {
         "A small window that says what dropped, and optionally holds the roll long enough for "
             .. "you to take it back. Click to cycle.",
-        "On its own it is a window: it stays where you put it, lists the session, and is there "
-            .. "in a fight like anything else you leave open. Give it a |cffffd100Fade|r time "
-            .. "below and it becomes a popup instead -- see that button.",
         "|cffffd100Off|r - nothing on screen. Rolls are answered the moment they drop and "
             .. "Blizzard's roll windows are left alone, exactly as without this setting.",
         "|cffffd100Drops only|r - lists what dropped and who took it, as it happens. Rolls are "
@@ -2091,35 +2094,30 @@ local function BuildPanel()
         "Doing nothing still rolls for you. That is the point of it.",
     })
 
-    panel.fade = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
-    panel.fade:SetSize(180, 22)
-    panel.fade:SetPoint("BOTTOMLEFT", 16, 12)
-    panel.fade:SetScript("OnClick", function()
-        db.linger = NextFade(db.linger)
+    -- The other window. Its own control because it is its own window: this one
+    -- has nothing to do with rolls, so it has no grace period on it and there
+    -- is nothing to walk through but how long it stays.
+    panel.popup = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+    panel.popup:SetSize(180, 22)
+    panel.popup:SetPoint("BOTTOMLEFT", 16, 12)
+    panel.popup:SetScript("OnClick", function()
+        db.popup = pop.next(db.popup)
         RefreshPanel()
-        FadeSettingChanged()
+        if not pop.on() then pop.gone() end
     end)
-    AttachTooltip(panel.fade, "Window fade", {
-        "How long the loot window stays up after the last thing dropped, which is what turns it "
-            .. "from a window into a popup. Click to cycle.",
-        "|cffffd100Stays up|r - a window. It is there all the time, listing the session, which "
-            .. "is what it has always done.",
-        "|cffffd1003s and up|r - a popup. It comes up on a drop, fills with whatever else that "
-            .. "pack drops, and goes again once they stop. Each drop puts the clock back to the "
-            .. "full wait.",
-        "It is |cffffd100emptied|r when it goes, so the next pull opens on a clean window rather "
-            .. "than on the tail of the last one. The drop log keeps all of it either way.",
-        "A roll still counting down keeps it up however short this is, and so does resting the "
-            .. "mouse on it: it never fades out from under a decision.",
-        "It only comes back for drops the |cffffd100Show|r threshold lets through, so set that "
-            .. "to Rare and a trash pull will not keep waking it.",
-        "A popup stays out of your way in combat: nothing appears while you are fighting, and "
-            .. "what dropped meanwhile is shown the moment you are not. With a grace period set, "
-            .. "a roll counting down still comes up, because that is the window you click to "
-            .. "take it back.",
-        "Closing a popup with the |cffffd100X|r only dismisses that showing -- the next drop "
-            .. "brings it back. Turning it off for good is this button's neighbour, or the "
-            .. "window's right-click menu.",
+    AttachTooltip(panel.popup, "Drop popup", {
+        "A small window that appears when something drops, says what it was, and goes again. "
+            .. "Click to cycle how long it stays.",
+        "Not the loot window in another guise: that one stays where you put it and is where a "
+            .. "roll counts down. This has nothing to answer, so it can leave.",
+        "Each drop puts the clock back to the full time, so a pack arrives as one window rather "
+            .. "than as five, and it is emptied when it goes -- the next pull starts clean.",
+        "|cffffd100Never in combat.|r What drops while you are fighting is held back and shown "
+            .. "the moment you are not, which is the point of it: you read it while the healer "
+            .. "drinks, not while you are being hit.",
+        "Drag to move it, right-click to put it away early, shift-click a row to link it. Needs "
+            .. "Track drops on, since it reads that log, and it only appears for drops the "
+            .. "|cffffd100Show|r threshold lets through.",
     })
 
     local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
@@ -2141,7 +2139,7 @@ function RefreshPanel()
     panel.track:SetChecked(db.track)
     panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
     panel.hud:SetText("Loot window: " .. HudLabel(db.hud, db.grace))
-    panel.fade:SetText("Fade: " .. FadeLabel(db.linger))
+    panel.popup:SetText("Drop popup: " .. pop.label(db.popup))
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
     panel.SelectQuality(panel.quality or 4)
@@ -2574,11 +2572,7 @@ end
 -- The drop log's newest rows rather than a second list of its own, so the
 -- quality slider in the log window filters this too and there is only ever one
 -- list to keep straight.
--- `only` is the set of rows to keep, or nil for the lot. With a fade time set
--- the window is a picture of this pack rather than of the night: it comes up
--- empty, fills while things are dropping, and is wiped when it fades, so the
--- next pull starts from nothing instead of scrolling a night of trash.
-local function RecentEntries(only)
+local function RecentEntries()
     -- START_LOOT_ROLL puts a winner-less row in the log for the same drop that
     -- is sitting in the pending list above, and one item on two lines of a
     -- small window is noise. Skipped until it has a winner, at which point it
@@ -2593,8 +2587,7 @@ local function RecentEntries(only)
         if #out >= MAX_ROLL_RECENT then break end
         local e = all[i]
         local stillRolling = waiting[e.id] and not e.winner and not e.stack
-        if not stillRolling and (not only or only[e])
-            and EntryQuality(e) >= (db.trackMin or 0) then
+        if not stillRolling and EntryQuality(e) >= (db.trackMin or 0) then
             -- a stack split per winner can push the list past the cap, so the
             -- trim happens after rather than the count being guessed before
             if e.stack then SplitStack(e, out) else out[#out + 1] = e end
@@ -2616,160 +2609,12 @@ local function SortedPending()
     return out
 end
 
--- Fading the window out again
---
--- "I want to see what dropped, I don't want that window on screen all night."
--- With a fade time set, the popup is not up between drops: something landing in
--- the log brings it back, and it goes again once nothing has happened for that
--- long. Nothing else about it changes -- same window, same place, same size,
--- same menu -- so there is one popup to configure rather than two.
--- The fade's own state and questions live on one table rather than on five
--- file-locals: this chunk is at Lua's limit of 200 of those, which is the same
--- reason WakeRollWindow below is a global.
-local fade = {
-    TIME   = 0.5,     -- seconds of actual fading, once the wait is over
-    queued = false,   -- a tick is already scheduled
-}
-
--- Is the popup the kind that comes and goes?
-function fade.on()
-    return (tonumber(db.linger) or 0) > 0
-end
-
--- Not while you are fighting -- which is a question about which of the two
--- windows this is rather than a setting. The loot window is a fixture and stays
--- where it is; the popup is a thing that appears at you, and one that appears
--- mid-pull is exactly what the request was to get away from.
---
--- A roll counting down is the exception: it has a deadline and a click that
--- takes it back, so hiding it loses the feature rather than tidying the screen.
--- With no grace set there are never any, so the popup simply goes when the
--- fighting starts.
-function fade.hiddenByCombat()
-    if not fade.on() or not InCombatLockdown() then return false end
-    return next(pendingRolls) == nil
-end
-
-function fade.tick()
-    fade.queued = false
-    if not rollWin or not rollWin:IsShown() then return end
-
-    local at = rollWin.fadeAt
-    if not at then return end
-
-    -- A roll still counting down owns this window, and so does a mouse resting
-    -- on it: both are somebody in the middle of using the thing. Push the time
-    -- out rather than fading from under them.
-    if next(pendingRolls) ~= nil or (MouseIsOver and MouseIsOver(rollWin)) then
-        at = GetTime() + (tonumber(db.linger) or 0)
-        rollWin.fadeAt = at
-    end
-
-    local left = at - GetTime()
-    if left > 0.05 then
-        fade.queued = true
-        -- capped, so letting go of the mouse is noticed within the second
-        -- rather than after another full wait
-        C_Timer.After(math.min(left, 1), fade.tick)
-        return
-    end
-
-    rollWin.fadeAt = nil
-
-    if UIFrameFadeOut then
-        UIFrameFadeOut(rollWin, fade.TIME, rollWin:GetAlpha(), 0)
-        C_Timer.After(fade.TIME, function()
-            -- a drop during the fade sets fadeAt again and cancels it, so this
-            -- only finishes the job if nothing has
-            if rollWin and not rollWin.fadeAt then fade.gone() end
-        end)
-    else
-        fade.gone()
-    end
-end
-
--- Gone means gone: the next pull opens on an empty window rather than on the
--- tail of this one. The drop log keeps all of it either way -- this wipes what
--- the popup is showing, not what was logged.
-function fade.gone()
-    if not rollWin then return end
-    rollWin.fadeAt = nil
-    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(rollWin) end
-    rollWin:SetAlpha(1)
-    rollWin:Hide()
-    rollWin.burst = nil
-    RefreshRollWindow()
-end
-
--- Something new worth looking at. `entry` is the log row it happened to, and
--- `force` brings the window up without one: a roll appearing, or combat ending
--- on a backlog. With no fade time this only files the row; with one, this is
--- what puts the window back on screen and restarts the clock.
-function WakeRollWindow(entry, force)
-    if not rollWin or not db.hud then return end
-
-    if entry then
-        -- The same threshold the window filters on, so a trash pull does not
-        -- keep waking it while the epics still do.
-        local q = entry.q or QualityOf(entry.link) or 0
-        if q < (db.trackMin or 0) then return end
-        -- Filed even while it is off screen, so what dropped in combat is
-        -- there to show the moment the fight ends.
-        if fade.on() then
-            rollWin.burst = rollWin.burst or {}
-            rollWin.burst[entry] = true
-        end
-    elseif not force then
-        return
-    end
-
-    if fade.hiddenByCombat() then return end
-
-    local linger = tonumber(db.linger) or 0
-    if linger <= 0 then return end   -- it never left
-
-    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(rollWin) end
-    rollWin:SetAlpha(1)
-    rollWin.fadeAt = GetTime() + linger
-    rollWin:Show()
-
-    if not fade.queued then
-        fade.queued = true
-        C_Timer.After(math.min(linger, 1), fade.tick)
-    end
-end
-
--- The fade time changed under it: either put the window back for good, or
--- start the clock on the one that is up.
-function FadeSettingChanged()
-    if not rollWin then return end
-    if (tonumber(db.linger) or 0) <= 0 then
-        rollWin.fadeAt = nil
-        if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(rollWin) end
-        rollWin:SetAlpha(1)
-        RefreshRollWindow()
-    else
-        -- Turning it on with the window up: what is on it stays on it and
-        -- becomes the first thing to fade, rather than the window blanking the
-        -- moment you choose a time.
-        if not rollWin.burst then
-            rollWin.burst = {}
-            for _, e in ipairs(db.loot.entries) do rollWin.burst[e] = true end
-        end
-        WakeRollWindow(nil, true)
-    end
-end
-
 function RefreshRollWindow()
     if not rollWin then return end
     if not db.hud then rollWin:Hide(); return end
-    if fade.hiddenByCombat() then rollWin:Hide(); return end
 
-    local rolls = SortedPending()
-    -- Stays-up mode is the whole list, as it always was; a fade time makes it
-    -- what has dropped since the window came up, and nothing at all once it
-    -- has been wiped.
-    local recent = RecentEntries(fade.on() and (rollWin.burst or {}) or nil)
+    local rolls  = SortedPending()
+    local recent = RecentEntries()
     local now    = GetTime()
 
     -- However many are pending, only as many as there is window for. The ones
@@ -2846,12 +2691,7 @@ function RefreshRollWindow()
         rollWin.hint:Hide()
     end
 
-    -- A redraw is not news. With a fade time set, the window comes up when
-    -- something happens -- WakeRollWindow -- or when there is a roll counting
-    -- down on it, and otherwise stays where it was.
-    if not fade.on() or npend > 0 or rollWin:IsShown() then
-        rollWin:Show()
-    end
+    rollWin:Show()
 end
 
 local function ClaimRoll(rollID)
@@ -2902,7 +2742,6 @@ function AddPendingRoll(rollID, action, link, grace)
     suppressed[rollID] = true
     HideDefaultFrame(rollID)
     C_Timer.After(grace, function() FirePending(rollID) end)
-    WakeRollWindow(nil, true)
     RefreshRollWindow()
 end
 
@@ -2915,23 +2754,11 @@ function CancelPendingRoll(rollID)
     RefreshRollWindow()
 end
 
--- The X in the header, and its menu.
---
--- What closing means depends on which of the two windows this is. The loot
--- window is a fixture you turned on, so closing it turns it off -- and takes
--- the grace period with it, because a roll held back with nowhere to see it is
--- worse than either setting alone. The popup is not something you turned on for
--- the night, it is something that just appeared: closing it dismisses this
--- showing, and the next drop brings it back. `off` is the menu asking for the
--- first of those from a window doing the second.
-function CloseRollWindow(off)
-    if fade.on() and not off then
-        fade.gone()
-        print("|cff66ccffAPLA|r loot window dismissed; the next drop brings it back")
-        return
-    end
+-- The X in the header, and /apla popup. Off takes the grace period with it: a
+-- roll held back with nowhere to see it is worse than either setting alone.
+function CloseRollWindow()
     db.hud, db.grace = false, 0
-    fade.gone()
+    RefreshRollWindow()
     if panel and panel:IsShown() then RefreshPanel() end
     print("|cff66ccffAPLA|r loot window off, and the grace period with it")
 end
@@ -2989,22 +2816,6 @@ local function RollMenuInit(_, level)
     end
 
     Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
-    Add({ text = "Fade out after", isTitle = true, notCheckable = true })
-
-    for _, step in ipairs(FADE_STEPS) do
-        Add({
-            text = step == 0 and "Never - stays up" or (step .. " seconds"),
-            checked = (tonumber(db.linger) or 0) == step,
-            func = function()
-                db.linger = step
-                if panel and panel:IsShown() then RefreshPanel() end
-                CloseDropDownMenus()
-                FadeSettingChanged()
-            end,
-        })
-    end
-
-    Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
     Add({
         -- named for the log rather than for this window, because that is what
         -- it empties: the drop log both this and the log window read
@@ -3015,24 +2826,11 @@ local function RollMenuInit(_, level)
             ConfirmClearLog()
         end,
     })
-    if fade.on() then
-        Add({
-            text = "Dismiss until the next drop",
-            notCheckable = true,
-            func = function() CloseRollWindow() end,
-        })
-        Add({
-            text = "Turn the loot window off",
-            notCheckable = true,
-            func = function() CloseRollWindow(true) end,
-        })
-    else
-        Add({
-            text = "Close this window",
-            notCheckable = true,
-            func = function() CloseRollWindow() end,
-        })
-    end
+    Add({
+        text = "Close this window",
+        notCheckable = true,
+        func = function() CloseRollWindow() end,
+    })
 end
 
 local function ShowRollMenu()
@@ -3330,6 +3128,234 @@ function LayoutRollWindow(npend)
     return shown
 end
 
+----------------------------------------------------------------
+-- The drop popup
+----------------------------------------------------------------
+-- A second window, and deliberately not a second mode of the first one.
+--
+-- The loot window is a fixture: you turn it on, it stays where you put it, it
+-- is where a roll counts down and where you click to take one back. A window
+-- you may have to answer is a window that has to stay.
+--
+-- This is the opposite of a fixture. It appears when something drops, says what
+-- it was, and goes -- the thing you glance at in the quiet after a pull, while
+-- the healer drinks and somebody is looting. So it has nothing to do with
+-- rolls: no grace period, no countdown, nothing to answer. It is off screen in
+-- combat for the same reason, and what drops while you are fighting is held
+-- back for the moment you are not.
+--
+-- Each drop puts its clock back to the full time, so a pack arrives as one
+-- window rather than as five. When the clock runs out it is wiped as well as
+-- hidden, so the next pull opens on an empty popup rather than on the tail of
+-- the last one. The drop log keeps all of it, which is what the drop log is
+-- for.
+
+-- What to draw: the burst, newest first, stacks split per winner the way the
+-- other windows split them.
+function pop.list()
+    local out = {}
+    for i = #pop.burst, 1, -1 do
+        local e = pop.burst[i]
+        if e.stack then SplitStack(e, out) else out[#out + 1] = e end
+        if #out >= pop.MAX_ROWS then break end
+    end
+    while #out > pop.MAX_ROWS do out[#out] = nil end
+    return out
+end
+
+function pop.build()
+    -- The same dark panel and hairline as the loot window: they are the addon's
+    -- two windows that sit over the game rather than over the UI.
+    local f = CreateFrame("Frame", "AutoPassLootAnnouncerPopup", UIParent)
+    f:SetSize(pop.W, pop.ROW_H + pop.PAD * 2)
+    f:SetPoint("CENTER", 0, 260)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:SetClampedToScreen(true)
+    f:SetFrameStrata("LOW")   -- for the reason the loot window is there
+    f:Hide()
+
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, rel, x, y = self:GetPoint()
+        db.popupPos = { point = point, rel = rel, x = x, y = y }
+    end)
+    -- Right-click puts it away now rather than in a few seconds. There is no
+    -- menu on it: it is not up long enough to be configured from, and what you
+    -- would set is on the loot window's menu and the settings panel.
+    f:SetScript("OnMouseUp", function(_, mouseButton)
+        if mouseButton == "RightButton" then pop.gone() end
+    end)
+
+    if db.popupPos then
+        f:ClearAllPoints()
+        f:SetPoint(db.popupPos.point, UIParent, db.popupPos.rel,
+            db.popupPos.x, db.popupPos.y)
+    end
+
+    local edge = f:CreateTexture(nil, "BACKGROUND")
+    edge:SetAllPoints()
+    Fill(edge, 1, 1, 1, 0.10)
+
+    local bg = f:CreateTexture(nil, "BORDER")
+    bg:SetPoint("TOPLEFT", 1, -1)
+    bg:SetPoint("BOTTOMRIGHT", -1, 1)
+    Fill(bg, 0, 0, 0, 0.60)   -- semi-transparent: it sits over the game
+
+    for i = 1, pop.MAX_ROWS do
+        local row = MakeRollRow(f, pop.ROW_H)
+        row:SetPoint("TOPLEFT", pop.PAD, -(pop.PAD + (i - 1) * pop.ROW_H))
+        row:SetWidth(pop.W - pop.PAD * 2)
+        row.text:SetWidth(pop.W - pop.PAD * 2 - pop.ROW_H - 95)
+
+        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who:SetPoint("RIGHT", -2, 0)
+        row.who:SetWidth(90)
+        row.who:SetJustifyH("RIGHT")
+
+        row:SetScript("OnEnter", function(self)
+            if not self.link then return end
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetHyperlink(self.link)
+            if self.res then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Reserved by: " .. self.res, 1, 0.82, 0, true)
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnClick", function(self, mouseButton)
+            if mouseButton == "RightButton" then pop.gone()
+            elseif self.link then HandleModifiedItemClick(self.link) end
+        end)
+
+        pop.rows[i] = row
+    end
+
+    pop.frame = f
+end
+
+function pop.refresh()
+    if not pop.frame then return end
+
+    local list = pop.list()
+    for i, row in ipairs(pop.rows) do
+        local e = list[i]
+        if e then
+            row.link, row.res = e.link, e.res
+            row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
+            row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
+                or e.link)
+            if not e.winner and not e.stack and e.res then
+                row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
+            else
+                row.who:SetText("|cff808080"
+                    .. (e.winner or (e.stack and "stacked") or "nobody") .. "|r")
+            end
+            row:Show()
+        else
+            row.link, row.res = nil, nil
+            row:Hide()
+        end
+    end
+
+    -- Exactly as tall as it has rows: a popup with empty space in it looks like
+    -- something failed to load.
+    pop.frame:SetHeight(math.max(1, #list) * pop.ROW_H + pop.PAD * 2)
+end
+
+-- Gone means gone: hidden and wiped, so the next drop starts a fresh one.
+function pop.gone()
+    pop.at = nil
+    for i = #pop.burst, 1, -1 do pop.burst[i] = nil end
+    if pop.frame then
+        if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(pop.frame) end
+        pop.frame:SetAlpha(1)
+        pop.frame:Hide()
+    end
+end
+
+-- Combat takes it off screen without wiping it: what dropped is still owed to
+-- you, and leaving combat is where that is paid.
+function pop.duck()
+    if pop.frame and pop.frame:IsShown() then
+        if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(pop.frame) end
+        pop.frame:SetAlpha(1)
+        pop.frame:Hide()
+    end
+end
+
+function pop.tick()
+    pop.queued = false
+    local f = pop.frame
+    if not f or not f:IsShown() or not pop.at then return end
+
+    if InCombatLockdown() then pop.duck(); return end
+
+    -- reading it counts as still wanting it
+    if MouseIsOver and MouseIsOver(f) then
+        pop.at = GetTime() + (tonumber(db.popup) or 0)
+    end
+
+    local left = pop.at - GetTime()
+    if left > 0.05 then
+        pop.queued = true
+        -- capped, so letting go of the mouse is noticed within the second
+        C_Timer.After(math.min(left, 1), pop.tick)
+        return
+    end
+
+    pop.at = nil
+    if UIFrameFadeOut then
+        UIFrameFadeOut(f, pop.FADE, f:GetAlpha(), 0)
+        -- a drop during the fade sets the clock again, and this leaves it be
+        C_Timer.After(pop.FADE, function() if not pop.at then pop.gone() end end)
+    else
+        pop.gone()
+    end
+end
+
+-- `entry` is the log row that just changed; nil means "show what you are
+-- holding", which is what leaving combat asks for.
+function pop.wake(entry)
+    if not pop.on() or not db.track then return end
+
+    if entry then
+        -- The same threshold the windows filter on, so a trash pull does not
+        -- keep putting a popup on screen while the epics still do.
+        local q = entry.q or QualityOf(entry.link) or 0
+        if q < (db.trackMin or 0) then return end
+
+        local seen = false
+        for _, e in ipairs(pop.burst) do
+            if e == entry then seen = true break end
+        end
+        if not seen then
+            pop.burst[#pop.burst + 1] = entry
+            while #pop.burst > pop.MAX_ROWS do table.remove(pop.burst, 1) end
+        end
+    elseif #pop.burst == 0 then
+        return
+    end
+
+    -- Collected either way; shown only once you are not busy.
+    if InCombatLockdown() then return end
+
+    if not pop.frame then pop.build() end
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(pop.frame) end
+    pop.frame:SetAlpha(1)
+    pop.refresh()
+    pop.frame:Show()
+
+    pop.at = GetTime() + (tonumber(db.popup) or 0)
+    if not pop.queued then
+        pop.queued = true
+        C_Timer.After(math.min(tonumber(db.popup) or 1, 1), pop.tick)
+    end
+end
+
 function RefreshAll()
     if panel and panel:IsShown() then
         RefreshPanel()   -- which ends by updating the minimap button too
@@ -3338,6 +3364,7 @@ function RefreshAll()
     end
     RefreshTracker()
     RefreshRollWindow()
+    if not pop.on() then pop.gone() end
     -- whether this copy announces at all is part of a preset, so the group's
     -- election has to hear about it rather than wait for the next heartbeat
     SendHello(true)
@@ -3357,6 +3384,8 @@ f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 f:RegisterEvent("CHAT_MSG_LOOT")
 f:RegisterEvent("CHAT_MSG_MONEY")
+-- The popup is not on screen in a fight, and what dropped during one is shown
+-- the moment it ends.
 f:RegisterEvent("PLAYER_REGEN_DISABLED")
 f:RegisterEvent("PLAYER_REGEN_ENABLED")
 -- Where a loot addon announces what the master looter is holding. Party and
@@ -3459,15 +3488,10 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         LogMoney(MoneyFromText(arg1 or ""))
 
     elseif event == "PLAYER_REGEN_DISABLED" then
-        RefreshRollWindow()   -- which takes the window off screen, if that is the setting
+        pop.duck()
 
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Out of combat: here is what dropped while you were in it. Only if
-        -- there is something, or every pull would end with an empty window.
-        if rollWin and ((rollWin.burst and next(rollWin.burst)) or next(pendingRolls)) then
-            WakeRollWindow(nil, true)
-        end
-        RefreshRollWindow()
+        pop.wake()
 
     elseif event:find("^CHAT_MSG_RAID") or event:find("^CHAT_MSG_PARTY")
         or event:find("^CHAT_MSG_INSTANCE_CHAT") then
@@ -3675,13 +3699,30 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     elseif cmd == "loot" then
         ToggleTracker()
         return
-    elseif cmd == "popup" or cmd == "roll" then
+    elseif cmd == "window" or cmd == "roll" then
         -- Turning the window off turns the grace off with it. A roll held back
         -- with nowhere to see it is worse than either setting on its own.
         db.hud = not db.hud
         if not db.hud then db.grace = 0 end
         print("|cff66ccffAPLA|r loot window: " .. HudLabel(db.hud, db.grace))
         RefreshRollWindow()
+    elseif cmd == "popup" then
+        -- Seconds, or nothing to turn it on and off. "popup" used to open the
+        -- loot window, which is now "window": the popup is a window of its own
+        -- and has the better claim on the name.
+        local n = tonumber(val)
+        if val and val ~= "" and not (n and n >= 0 and n <= 60) then
+            print("|cff66ccffAPLA|r /apla popup <0-60>, seconds; 0 turns it off")
+        else
+            if n then
+                db.popup = math.floor(n)
+            else
+                db.popup = pop.on() and 0 or 5
+            end
+            print("|cff66ccffAPLA|r drop popup: " .. pop.label(db.popup))
+            if not pop.on() then pop.gone() end
+            if panel and panel:IsShown() then RefreshPanel() end
+        end
     elseif cmd == "grace" then
         local n = tonumber(val)
         if n and n >= 0 and n <= 60 then
@@ -3692,16 +3733,6 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
             RefreshRollWindow()
         else
             print("|cff66ccffAPLA|r /apla grace <0-60>, seconds; 0 answers straight away")
-        end
-    elseif cmd == "fade" then
-        local n = tonumber(val)
-        if n and n >= 0 and n <= 60 then
-            db.linger = math.floor(n)
-            print("|cff66ccffAPLA|r loot window fade: " .. FadeLabel(db.linger))
-            if panel and panel:IsShown() then RefreshPanel() end
-            FadeSettingChanged()
-        else
-            print("|cff66ccffAPLA|r /apla fade <0-60>, seconds; 0 leaves the window up")
         end
     elseif cmd == "track" then
         db.track = not db.track
