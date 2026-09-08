@@ -32,10 +32,9 @@ local defaults = {
                            -- Account-wide, not per preset: it is a question about
                            -- this session rather than about a role, and when it is
                            -- "ask" the prompt is where you pick the preset anyway.
-    hud          = false,  -- the loot popup: say what dropped as it drops
+    hud          = false,  -- the loot window: say what dropped as it drops
     grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
     linger       = 0,      -- seconds the popup stays up after a drop, 0 = stays up
-    hideCombat   = false,  -- keep the popup off screen while you are fighting
     track        = false,  -- keep a log of what dropped; off until you ask for it
     trackMin     = 2,      -- log uncommon and better
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
@@ -54,7 +53,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "linger", "hideCombat",
+    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "linger",
     "track", "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -77,7 +76,7 @@ local function NextLoginArm(cur)
     end
     return LOGIN_ARM_ORDER[1]
 end
--- The loot popup, as one cycle button rather than two controls. Showing what
+-- The loot window, as one cycle button rather than two controls. Showing what
 -- dropped and holding a roll long enough to take it back were asked for
 -- separately, and they are separable -- but they are points on one line, from
 -- "tell me nothing" through "tell me" to "tell me and wait for me", so one
@@ -94,7 +93,7 @@ local HUD_STEPS = {
 -- How long the popup stays up after the last drop. A separate question from
 -- grace -- grace is how long a roll waits, this is how long the window does --
 -- so it is a control of its own rather than another six steps on that one.
-local FADE_STEPS = { 0, 5, 10, 20, 30 }
+local FADE_STEPS = { 0, 3, 5, 10 }
 
 local function NextFade(linger)
     linger = tonumber(linger) or 0
@@ -564,7 +563,6 @@ local function EncodePreset(name, v)
         ("h=%d"):format(v.hud and 1 or 0),
         ("g=%d"):format(tonumber(v.grace) or defaults.grace),
         ("f=%d"):format(tonumber(v.linger) or defaults.linger),
-        ("hc=%d"):format(v.hideCombat and 1 or 0),
         ("bop=%s"):format(EncodeActions(v.actionsBoP)),
         ("boe=%s"):format(EncodeActions(v.actionsBoE)),
         ("bes=%s"):format(EncodeActions(v.actionsBoEStack)),
@@ -613,7 +611,6 @@ local function DecodePreset(code)
         hud        = flag("h", defaults.hud),
         grace      = num("g", 0, 60, defaults.grace),
         linger     = num("f", 0, 60, defaults.linger),
-        hideCombat = flag("hc", defaults.hideCombat),
         prefix     = f.p and Unesc(f.p) or defaults.prefix,
         actionsBoP      = DecodeActions(f.bop or ""),
         actionsBoE      = DecodeActions(f.boe or ""),
@@ -2069,7 +2066,7 @@ local function BuildPanel()
     -- tall as some people's screens, and this is a cycle button like At login
     -- rather than anything that wants a slider's width.
     panel.hud = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
-    panel.hud:SetSize(160, 22)
+    panel.hud:SetSize(180, 22)
     panel.hud:SetPoint("BOTTOMLEFT", 16, 38)
     panel.hud:SetScript("OnClick", function()
         local step = NextHud(db.hud, db.grace)
@@ -2077,9 +2074,12 @@ local function BuildPanel()
         RefreshPanel()
         RefreshRollWindow()
     end)
-    AttachTooltip(panel.hud, "Loot popup", {
+    AttachTooltip(panel.hud, "Loot window", {
         "A small window that says what dropped, and optionally holds the roll long enough for "
             .. "you to take it back. Click to cycle.",
+        "On its own it is a window: it stays where you put it, lists the session, and is there "
+            .. "in a fight like anything else you leave open. Give it a |cffffd100Fade|r time "
+            .. "below and it becomes a popup instead -- see that button.",
         "|cffffd100Off|r - nothing on screen. Rolls are answered the moment they drop and "
             .. "Blizzard's roll windows are left alone, exactly as without this setting.",
         "|cffffd100Drops only|r - lists what dropped and who took it, as it happens. Rolls are "
@@ -2092,28 +2092,34 @@ local function BuildPanel()
     })
 
     panel.fade = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
-    panel.fade:SetSize(160, 22)
+    panel.fade:SetSize(180, 22)
     panel.fade:SetPoint("BOTTOMLEFT", 16, 12)
     panel.fade:SetScript("OnClick", function()
         db.linger = NextFade(db.linger)
         RefreshPanel()
         FadeSettingChanged()
     end)
-    AttachTooltip(panel.fade, "Popup fade", {
-        "How long the loot popup stays on screen after the last thing dropped. Click to cycle.",
-        "|cffffd100Stays up|r - the window is there all the time, listing the session, which is "
-            .. "what it has always done.",
-        "|cffffd1005s and up|r - it comes up on a drop, fills with whatever else that pack "
-            .. "drops, and goes again once they stop. Each drop puts the clock back to the full "
-            .. "wait.",
+    AttachTooltip(panel.fade, "Window fade", {
+        "How long the loot window stays up after the last thing dropped, which is what turns it "
+            .. "from a window into a popup. Click to cycle.",
+        "|cffffd100Stays up|r - a window. It is there all the time, listing the session, which "
+            .. "is what it has always done.",
+        "|cffffd1003s and up|r - a popup. It comes up on a drop, fills with whatever else that "
+            .. "pack drops, and goes again once they stop. Each drop puts the clock back to the "
+            .. "full wait.",
         "It is |cffffd100emptied|r when it goes, so the next pull opens on a clean window rather "
             .. "than on the tail of the last one. The drop log keeps all of it either way.",
         "A roll still counting down keeps it up however short this is, and so does resting the "
             .. "mouse on it: it never fades out from under a decision.",
         "It only comes back for drops the |cffffd100Show|r threshold lets through, so set that "
             .. "to Rare and a trash pull will not keep waking it.",
-        "|cffffd100Hide in combat|r, on the window's right-click menu, keeps it off screen while "
-            .. "you are fighting and shows what dropped the moment you are not.",
+        "A popup stays out of your way in combat: nothing appears while you are fighting, and "
+            .. "what dropped meanwhile is shown the moment you are not. With a grace period set, "
+            .. "a roll counting down still comes up, because that is the window you click to "
+            .. "take it back.",
+        "Closing a popup with the |cffffd100X|r only dismisses that showing -- the next drop "
+            .. "brings it back. Turning it off for good is this button's neighbour, or the "
+            .. "window's right-click menu.",
     })
 
     local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
@@ -2134,7 +2140,7 @@ function RefreshPanel()
     panel.pepe:SetChecked(db.pepe)
     panel.track:SetChecked(db.track)
     panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
-    panel.hud:SetText("Popup: " .. HudLabel(db.hud, db.grace))
+    panel.hud:SetText("Loot window: " .. HudLabel(db.hud, db.grace))
     panel.fade:SetText("Fade: " .. FadeLabel(db.linger))
     panel.chSlider:SetValue(db.channel)
     panel.slider:SetValue(db.minQuality)
@@ -2630,11 +2636,17 @@ function fade.on()
     return (tonumber(db.linger) or 0) > 0
 end
 
--- "Not while I am fighting." A roll counting down is the exception: it has a
--- deadline and a click that takes it back, so hiding it is losing the feature
--- rather than tidying the screen. A drop is only news.
+-- Not while you are fighting -- which is a question about which of the two
+-- windows this is rather than a setting. The loot window is a fixture and stays
+-- where it is; the popup is a thing that appears at you, and one that appears
+-- mid-pull is exactly what the request was to get away from.
+--
+-- A roll counting down is the exception: it has a deadline and a click that
+-- takes it back, so hiding it loses the feature rather than tidying the screen.
+-- With no grace set there are never any, so the popup simply goes when the
+-- fighting starts.
 function fade.hiddenByCombat()
-    if not db.hideCombat or not InCombatLockdown() then return false end
+    if not fade.on() or not InCombatLockdown() then return false end
     return next(pendingRolls) == nil
 end
 
@@ -2664,26 +2676,29 @@ function fade.tick()
 
     rollWin.fadeAt = nil
 
-    -- Gone means gone: the next pull opens on an empty window rather than on
-    -- the tail of this one. The drop log keeps all of it either way -- this
-    -- wipes what the popup is showing, not what was logged.
-    local function Gone()
-        rollWin:Hide()
-        rollWin:SetAlpha(1)
-        rollWin.burst = nil
-        RefreshRollWindow()
-    end
-
     if UIFrameFadeOut then
         UIFrameFadeOut(rollWin, fade.TIME, rollWin:GetAlpha(), 0)
         C_Timer.After(fade.TIME, function()
             -- a drop during the fade sets fadeAt again and cancels it, so this
             -- only finishes the job if nothing has
-            if rollWin and not rollWin.fadeAt then Gone() end
+            if rollWin and not rollWin.fadeAt then fade.gone() end
         end)
     else
-        Gone()
+        fade.gone()
     end
+end
+
+-- Gone means gone: the next pull opens on an empty window rather than on the
+-- tail of this one. The drop log keeps all of it either way -- this wipes what
+-- the popup is showing, not what was logged.
+function fade.gone()
+    if not rollWin then return end
+    rollWin.fadeAt = nil
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(rollWin) end
+    rollWin:SetAlpha(1)
+    rollWin:Hide()
+    rollWin.burst = nil
+    RefreshRollWindow()
 end
 
 -- Something new worth looking at. `entry` is the log row it happened to, and
@@ -2900,13 +2915,25 @@ function CancelPendingRoll(rollID)
     RefreshRollWindow()
 end
 
--- The X in the header, and /apla popup. Off takes the grace period with it: a
--- roll held back with nowhere to see it is worse than either setting alone.
-function CloseRollWindow()
+-- The X in the header, and its menu.
+--
+-- What closing means depends on which of the two windows this is. The loot
+-- window is a fixture you turned on, so closing it turns it off -- and takes
+-- the grace period with it, because a roll held back with nowhere to see it is
+-- worse than either setting alone. The popup is not something you turned on for
+-- the night, it is something that just appeared: closing it dismisses this
+-- showing, and the next drop brings it back. `off` is the menu asking for the
+-- first of those from a window doing the second.
+function CloseRollWindow(off)
+    if fade.on() and not off then
+        fade.gone()
+        print("|cff66ccffAPLA|r loot window dismissed; the next drop brings it back")
+        return
+    end
     db.hud, db.grace = false, 0
-    RefreshRollWindow()
+    fade.gone()
     if panel and panel:IsShown() then RefreshPanel() end
-    print("|cff66ccffAPLA|r loot popup off, and the grace period with it")
+    print("|cff66ccffAPLA|r loot window off, and the grace period with it")
 end
 
 ----------------------------------------------------------------
@@ -2940,15 +2967,6 @@ local function RollMenuInit(_, level)
             RefreshTracker()
             RefreshRollWindow()
             if panel and panel:IsShown() then RefreshPanel() end
-        end,
-    })
-
-    Add({
-        text = "Hide in combat",
-        checked = db.hideCombat and true or false,
-        func = function()
-            db.hideCombat = not db.hideCombat
-            RefreshRollWindow()
         end,
     })
 
@@ -2997,11 +3015,24 @@ local function RollMenuInit(_, level)
             ConfirmClearLog()
         end,
     })
-    Add({
-        text = "Close this window",
-        notCheckable = true,
-        func = function() CloseRollWindow() end,
-    })
+    if fade.on() then
+        Add({
+            text = "Dismiss until the next drop",
+            notCheckable = true,
+            func = function() CloseRollWindow() end,
+        })
+        Add({
+            text = "Turn the loot window off",
+            notCheckable = true,
+            func = function() CloseRollWindow(true) end,
+        })
+    else
+        Add({
+            text = "Close this window",
+            notCheckable = true,
+            func = function() CloseRollWindow() end,
+        })
+    end
 end
 
 local function ShowRollMenu()
@@ -3649,7 +3680,7 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         -- with nowhere to see it is worse than either setting on its own.
         db.hud = not db.hud
         if not db.hud then db.grace = 0 end
-        print("|cff66ccffAPLA|r loot popup: " .. HudLabel(db.hud, db.grace))
+        print("|cff66ccffAPLA|r loot window: " .. HudLabel(db.hud, db.grace))
         RefreshRollWindow()
     elseif cmd == "grace" then
         local n = tonumber(val)
@@ -3657,7 +3688,7 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
             db.grace = math.floor(n)
             -- and the window on, for the same reason
             if db.grace > 0 then db.hud = true end
-            print("|cff66ccffAPLA|r loot popup: " .. HudLabel(db.hud, db.grace))
+            print("|cff66ccffAPLA|r loot window: " .. HudLabel(db.hud, db.grace))
             RefreshRollWindow()
         else
             print("|cff66ccffAPLA|r /apla grace <0-60>, seconds; 0 answers straight away")
@@ -3666,17 +3697,12 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         local n = tonumber(val)
         if n and n >= 0 and n <= 60 then
             db.linger = math.floor(n)
-            print("|cff66ccffAPLA|r loot popup fade: " .. FadeLabel(db.linger))
+            print("|cff66ccffAPLA|r loot window fade: " .. FadeLabel(db.linger))
             if panel and panel:IsShown() then RefreshPanel() end
             FadeSettingChanged()
         else
-            print("|cff66ccffAPLA|r /apla fade <0-60>, seconds; 0 leaves the popup up")
+            print("|cff66ccffAPLA|r /apla fade <0-60>, seconds; 0 leaves the window up")
         end
-    elseif cmd == "combat" then
-        db.hideCombat = not db.hideCombat
-        print("|cff66ccffAPLA|r loot popup in combat: "
-            .. (db.hideCombat and "hidden" or "shown"))
-        RefreshRollWindow()
     elseif cmd == "track" then
         db.track = not db.track
         print("|cff66ccffAPLA|r drop tracking: " .. tostring(db.track))
