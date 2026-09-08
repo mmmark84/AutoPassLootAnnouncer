@@ -8,7 +8,6 @@
 ## X-License: MIT
 ## X-Website: https://github.com/mmmark84/AutoPassLootAnnouncer
 ## X-Category: Raid Mods
-# Uncomment once the CurseForge project exists, the packager needs it to upload:
-# ## X-Curse-Project-ID: 000000
+## X-Curse-Project-ID: 1685629
 
 AutoPassLootAnnouncer.lua
