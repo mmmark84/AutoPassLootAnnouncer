@@ -1,8 +1,27 @@
 # Changelog
 
-## [1.7.3] - 2026-09-08
+## [1.8.0] - 2026-09-08
 
 ### Added
+- Master-looted drops appear in the window when they drop, rather than when
+  somebody is handed one. Under master loot there is no roll to hang a drop on,
+  so until now the first the log heard of an item was "X receives loot", which
+  is the end of the story rather than the start of it. What the raid does see
+  is the loot master's addon announcing the drop, and that is what these rows
+  are read from.
+- Reserves are kept with the drop. A row nobody has won yet shows who is first
+  in line and how many are behind -- "Zenoss +1" -- and the names in full are on
+  the row's tooltip. The winner replaces them when the item is handed over, and
+  the reserves stay on the row for reference.
+- Only two shapes are read, and both of them are an addon talking rather than a
+  person: Gargul, which stamps a raid marker and its own name in front of
+  everything it says to the group, and LootReserve, which says "<item> is
+  reserved by: ...". A raider linking an item to ask who needs it is not an
+  announcement and is left alone.
+- An announced item waits half an hour for its name instead of the three
+  minutes a roll gets, because a master looter deliberating is not a
+  ten-second roll. An item that is announced and rolled -- Gargul alongside
+  group loot -- fills the row already waiting rather than listing it twice.
 - A drop popup: a small window that appears when something drops, says what it
   was, and goes again. Off by default; the **Drop popup** button on the settings
   panel cycles off, 3, 5 and 10 seconds, and `/apla popup <0-60>` does the same.
@@ -22,9 +41,9 @@
 - No grace period and no countdown on it, deliberately. Taking a roll back is
   the loot window's job and that window stays up precisely because it might
   need you. Run both if you want both.
-- Drag to move, right-click to put it away early, shift-click a row to link it.
-  Its position is remembered per account, it only appears for drops the Show
-  threshold lets through, and it needs Track drops on since it reads that log.
+- Drag it by its rows to move it, right-click to put it away early, shift-click
+  a row to link it. Its position and size are remembered per account, and it
+  only appears for drops the Show threshold lets through.
 - It is part of a preset, so a raid preset can run it and a five-man preset
   leave it off.
 
@@ -86,29 +105,6 @@
   name.
 - The settings panel calls the first button **Loot window** rather than Popup,
   now that there is a popup for it to be confused with.
-
-## [1.7.2] - 2026-09-08
-
-### Added
-- Master-looted drops appear in the window when they drop, rather than when
-  somebody is handed one. Under master loot there is no roll to hang a drop on,
-  so until now the first the log heard of an item was "X receives loot", which
-  is the end of the story rather than the start of it. What the raid does see
-  is the loot master's addon announcing the drop, and that is what these rows
-  are read from.
-- Reserves are kept with the drop. A row nobody has won yet shows who is first
-  in line and how many are behind -- "Zenoss +1" -- and the names in full are on
-  the row's tooltip. The winner replaces them when the item is handed over, and
-  the reserves stay on the row for reference.
-- Only two shapes are read, and both of them are an addon talking rather than a
-  person: Gargul, which stamps a raid marker and its own name in front of
-  everything it says to the group, and LootReserve, which says "<item> is
-  reserved by: ...". A raider linking an item to ask who needs it is not an
-  announcement and is left alone.
-- An announced item waits half an hour for its name instead of the three
-  minutes a roll gets, because a master looter deliberating is not a
-  ten-second roll. An item that is announced and rolled -- Gargul alongside
-  group loot -- fills the row already waiting rather than listing it twice.
 
 ### Fixed
 - The addon no longer makes the client say "You are not in a raid group" every
