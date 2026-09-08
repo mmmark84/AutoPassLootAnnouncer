@@ -632,7 +632,7 @@ end
 local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
-local LogDrop, LogMoney, ClearLog
+local LogDrop, LogAnnounced, LogMoney, ClearLog
 local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
 
 -- The drop popup. Everything it owns hangs off this one table: the drop log

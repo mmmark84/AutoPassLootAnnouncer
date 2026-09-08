@@ -21,7 +21,7 @@ globals = {
     "SLASH_AUTOPASSLOOTANNOUNCER2",
     "AutoPassLootAnnouncerMinimapButton",
     "AutoPassLootAnnouncerPanel",
-    "AutoPassLootAnnouncerTracker",
+    "AutoPassLootAnnouncerPopup",
     "AutoPassLootAnnouncerPresetCode",
     "AutoPassLootAnnouncerArmPrompt",
     "AutoPassLootAnnouncerRollWindow",
@@ -39,6 +39,13 @@ read_globals = {
     "GameTooltip", "GetCursorPosition", "GetItemInfo", "GetLootRollItemInfo",
     "GetLootRollItemLink", "GetLootRollTimeLeft", "GetNumGroupMembers", "GetTime",
     "ITEM_QUALITY_COLORS", "IsInGroup", "IsInRaid", "Minimap",
+    "InCombatLockdown", "IsInInstance", "MouseIsOver",
+    -- An instance group -- a battleground, an arena, a dungeon-finder party --
+    -- takes INSTANCE_CHAT rather than RAID, and the constant that names one is
+    -- missing on clients old enough not to have them, so its use is guarded.
+    "LE_PARTY_CATEGORY_INSTANCE",
+    -- The popup fades rather than blinking out, where the client can.
+    "UIFrameFadeOut", "UIFrameFadeRemoveFrame",
     "RegisterAddonMessagePrefix", "RollOnLoot", "SendAddonMessage",
     "SendChatMessage", "StaticPopup_Show", "UIParent", "UISpecialFrames",
     "UnitGUID", "UnitName", "tinsert", "time", "wipe",
