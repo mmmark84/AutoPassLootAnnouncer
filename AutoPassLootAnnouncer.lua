@@ -2286,6 +2286,12 @@ end
 -- The drop log's newest rows rather than a second list of its own, so the
 -- quality slider in the log window filters this too and there is only ever one
 -- list to keep straight.
+--
+-- One row per item per winner rather than one per drop: three Hearts of
+-- Darkness that all went the same way read as an "x3" beside the name, which
+-- is the question this window is being asked -- who ended up with what. The
+-- log itself is still a drop a row, so the popup goes on showing only the ones
+-- that landed while it was up.
 local function RecentEntries()
     -- START_LOOT_ROLL puts a winner-less row in the log for the same drop that
     -- is sitting in the pending list above, and one item on two lines of a
@@ -2296,18 +2302,34 @@ local function RecentEntries()
         if p.itemID then waiting[p.itemID] = true end
     end
 
+    -- [itemID][winner] = the row already standing for those drops. Only won
+    -- rows fold: one still waiting for a name is a drop in the air, and how
+    -- many of those are up is worth seeing rather than summing.
+    local folded = {}
+
     local out, all = {}, db.loot.entries
     for i = #all, 1, -1 do
-        if #out >= MAX_ROLL_RECENT then break end
         local e = all[i]
-        local stillRolling = waiting[e.id] and not e.winner and not e.stack
+        local stillRolling = waiting[e.id] and not e.winner
         if not stillRolling and EntryQuality(e) >= (db.trackMin or 0) then
-            -- a stack split per winner can push the list past the cap, so the
-            -- trim happens after rather than the count being guessed before
-            if e.stack then SplitStack(e, out) else out[#out + 1] = e end
+            local into = e.winner and folded[e.id] and folded[e.id][e.winner]
+            if into then
+                into.count = into.count + (e.count or 1)
+            elseif #out < MAX_ROLL_RECENT then
+                -- A copy of the row, not the row: a total is this window's
+                -- reading of the log, and nothing the log should be told.
+                local row = { id = e.id, link = e.link, count = e.count or 1,
+                              winner = e.winner, res = e.res, q = e.q, t = e.t }
+                out[#out + 1] = row
+                if e.winner then
+                    folded[e.id] = folded[e.id] or {}
+                    folded[e.id][e.winner] = row
+                end
+            end
+            -- Past the last row there is window for we keep reading, because
+            -- an older drop can still belong to a total that is on show.
         end
     end
-    while #out > MAX_ROLL_RECENT do out[#out] = nil end
     return out
 end
 

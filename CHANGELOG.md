@@ -2,6 +2,16 @@
 
 ## [1.8.1] - 2026-09-09
 
+### Changed
+- The loot window totals what one person ended up with on one row. Three
+  Hearts of Darkness that all went the same way read as
+  `[Heart of Darkness] x3` beside the name rather than as three lines, because
+  that is the question that window is being asked -- who has what. A drop still
+  waiting for a name keeps its own row: how many are in the air is worth seeing
+  rather than summing. The log underneath is untouched, a drop a row, and so is
+  the popup -- its whole subject is what just dropped, so it goes on showing
+  only the drops that landed while it was up.
+
 ### Fixed
 - A stack shows up when it drops, like everything else. A stackable used to be
   held back until somebody looted it, on the grounds that the loot message was

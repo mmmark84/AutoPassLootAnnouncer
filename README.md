@@ -169,13 +169,14 @@ Off by default. **Loot window** at the bottom of the options panel cycles throug
 ├───────────────────────────────────────────────┤
 │ Bloodfist Helmet ..................... Isaari │
 │ Heart of Darkness x2 ................. nobody │
+│ Heart of Darkness x3 ................ Aereora │
 │ Mark of the Illidari x12 ............ Perhorn │
 └──────────────────────────────────────────────◢┘
 ```
 
 Above the line are pending rolls. **The countdown is the row itself**: a band the full width of it, draining away leftwards behind the item name, so how long is left reads from the corner of your eye without the number being read. It warms from green through amber to red as it goes. The seconds are there beside it for when you want the exact figure.
 
-Below the line, what already happened. A drop still pending above is not repeated below.
+Below the line, what already happened, **totalled per person**: three Hearts of Darkness that all went to Aereora are one row reading `x3` rather than three lines, because what this window is being asked is who ended up with what. A drop still waiting for a name keeps a row of its own — how many are in the air is worth seeing rather than summing — and a drop still pending above is not repeated below.
 
 #### Moving, sizing, closing
 
@@ -240,7 +241,7 @@ That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else t
 
 So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
 
-The roll says how many dropped as well as what did, so a stack is a drop like any other: a row when it drops, reading `nobody`, with the number that dropped on it and a name once somebody loots it. Ten hearts off a night of trash are ten rows, not one row reading `x10`.
+The roll says how many dropped as well as what did, so a stack is a drop like any other: logged when it drops, reading `nobody`, with the number that dropped on it and a name once somebody loots it. Ten hearts off a night of trash are ten entries rather than one running total — which is what lets the popup say `x2` for the two that just dropped while the loot window adds them up per winner.
 
 **One consequence worth knowing:** solo, nothing is ever rolled for, so nothing is logged. The log is a record of what the group was offered, not of what you picked up.
 
