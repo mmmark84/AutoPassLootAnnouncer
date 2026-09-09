@@ -798,7 +798,9 @@ local function ProcessRoll(rollID, tries)
     end
 
     local link = GetLootRollItemLink(rollID)
-    local rollQuality, rollBoP = select(4, GetLootRollItemInfo(rollID))
+    -- Return 3 is how many dropped for this roll, which is the one thing that
+    -- knows the size of a stack before anybody has looted it.
+    local rollCount, rollQuality, rollBoP = select(3, GetLootRollItemInfo(rollID))
     local quality = rollQuality or QualityOf(link)
     local bop = BindOnPickup(rollQuality, rollBoP, link)
     local stackable = IsStackable(link)
@@ -823,7 +825,7 @@ local function ProcessRoll(rollID, tries)
         Queue(link)
     end
 
-    LogDrop(link, nil, nil, true)
+    LogDrop(link, rollCount, nil, true)
 
     if not db.autopass then
         Dbg("not armed, leaving roll %d alone", rollID)
@@ -844,7 +846,7 @@ local function ProcessRoll(rollID, tries)
     if grace <= 0 then
         DoRoll(rollID, action, link)
     else
-        AddPendingRoll(rollID, action, link, grace)
+        AddPendingRoll(rollID, action, link, grace, rollCount)
     end
 end
 
@@ -977,11 +979,19 @@ end
 -- the drops that were.
 --
 -- So START_LOOT_ROLL is what makes an item loggable, and the loot message only
--- says who ended up with it. That is also what separates the two: the roll
--- fires before anyone has won, so a non-stacking item gets its row there and
--- waits for a name -- one that never gets a name is a drop nobody took --
--- while a stackable waits for the message, which is the only thing that says
--- how many. Counting a stackable from both would count it twice.
+-- says who ended up with it. The roll fires before anyone has won, so a drop
+-- gets its row there and waits for a name -- one that never gets a name is a
+-- drop nobody took.
+--
+-- A stack is no different, because the roll says how many dropped as well as
+-- what did. It used to wait for the loot message on the grounds that nothing
+-- else knew the size of it, and the cost of waiting was that a stack was
+-- invisible until somebody looted it: no row overhead, no popup, nothing to
+-- tell you an epic mat had just dropped. It also meant a stack could only be
+-- one row per item with a running total, because there was nothing to hang a
+-- drop on -- so the number you read was the night's tally rather than what had
+-- just dropped. A row per drop, counted once at the roll and named at the
+-- message, answers both.
 --
 -- The quality slider still filters the view rather than what is kept: a
 -- threshold on the way in throws away rows you cannot ask for later, where a
@@ -1107,56 +1117,41 @@ function LogDrop(link, count, winner, offered)
         end
     end
 
-    -- a count above one settles it; otherwise ask the item itself
-    local stacks = (count and count > 1) or IsStackable(link) == true
+    -- The roll and the loot message both say how many. An announcement does
+    -- not, so its row goes in as one and is corrected when the message names a
+    -- winner -- an announcement is what dropped, not how much of it.
+    local n = count or 1
 
-    if stacks then
-        if not winner then return end   -- wait for the loot message to say how many
-        -- An announcement can have put a winner-less row in for this item
-        -- before anyone had it. A stack keeps its tally on one row of its own
-        -- instead, so the placeholder has done its job, and left alone it would
-        -- sit at "nobody" for the rest of the night.
-        for i = #entries, 1, -1 do
-            local e = entries[i]
-            if e.id == id and e.announced and not e.stack and not e.winner then
-                table.remove(entries, i)
-            end
-        end
+    if winner then
+        -- The row this drop is already on, so the roll and the loot message
+        -- between them count it once. Oldest first, so names land in the order
+        -- the rolls did rather than backwards -- except where a row is waiting
+        -- on this exact count, which is what tells two stacks of the same item
+        -- apart when both are in the air.
+        local oldest, exact
         for _, e in ipairs(entries) do
-            if e.id == id and e.stack then
-                e.count, e.t = e.count + count, time()
-                -- who took how many, so a stack can still be split back out per
-                -- character. A non-stackable row does not need this: it has one
-                -- winner and that name is already on it.
-                e.by = e.by or {}
-                e.by[winner] = (e.by[winner] or 0) + count
-                LootChanged(e)
-                return
-            end
-        end
-        entries[#entries + 1] = { id = id, link = link, count = count, stack = true,
-                                  by = { [winner] = count }, q = quality, t = time() }
-    elseif winner then
-        -- fill the oldest row still waiting on this item, so names land in the
-        -- order the rolls did rather than backwards
-        for _, e in ipairs(entries) do
-            if e.id == id and not e.stack and not e.winner
+            if e.id == id and not e.winner
                 and (time() - e.t)
                     <= (e.announced and ANNOUNCED_MATCH_WINDOW or LOOT_MATCH_WINDOW) then
-                e.winner = winner
-                LootChanged(e)
-                return
+                oldest = oldest or e
+                if e.count == n and not exact then exact = e end
             end
         end
+        local row = exact or oldest
+        if row then
+            row.winner, row.count = winner, n
+            LootChanged(row)
+            return
+        end
         entries[#entries + 1] =
-            { id = id, link = link, count = 1, winner = winner, q = quality, t = time() }
+            { id = id, link = link, count = n, winner = winner, q = quality, t = time() }
     else
-        entries[#entries + 1] = { id = id, link = link, count = 1, q = quality, t = time() }
+        entries[#entries + 1] = { id = id, link = link, count = n, q = quality, t = time() }
     end
 
     db.loot.started = db.loot.started or time()
     while #entries > MAX_LOOT_ROWS do table.remove(entries, 1) end
-    Dbg("logged %s x%d winner=%s", tostring(link), count or 1, tostring(winner))
+    Dbg("logged %s x%d winner=%s", tostring(link), n, tostring(winner))
     LootChanged(entries[#entries])
 end
 
@@ -1242,7 +1237,7 @@ function LogAnnounced(link, reserves)
     -- row already waiting for a winner rather than listing the item twice.
     for i = #entries, 1, -1 do
         local e = entries[i]
-        if e.id == id and not e.stack and not e.winner
+        if e.id == id and not e.winner
             and (time() - e.t) <= LOOT_MATCH_WINDOW then
             if reserves then e.res = reserves end
             lastAnnounced, lastAnnouncedAt = e, time()
@@ -2197,31 +2192,6 @@ local function EntryQuality(e)
     return e.q
 end
 
--- A stacked row records who took how many, so it can be drawn as one line per
--- winner rather than a single "stacked" that says nothing about where the
--- stack went. One winner is the common case and stays one line, with the name
--- on it and the whole count. Rows logged before the per-winner counts existed
--- have no answer to give and keep saying "stacked".
-local function SplitStack(e, out)
-    local names = {}
-    for who in pairs(e.by or {}) do names[#names + 1] = who end
-    if #names == 0 then
-        out[#out + 1] = e
-        return out
-    end
-    -- biggest share first, and by name where two shares are equal, so the
-    -- order does not shuffle between redraws the way pairs() would
-    table.sort(names, function(a, b)
-        if e.by[a] ~= e.by[b] then return e.by[a] > e.by[b] end
-        return a < b
-    end)
-    for _, who in ipairs(names) do
-        out[#out + 1] = { id = e.id, link = e.link, count = e.by[who], stack = true,
-                          winner = who, q = EntryQuality(e), t = e.t }
-    end
-    return out
-end
-
 -- "Hikø +2" out of "Hikø, Perhorn, Grendl". The winner column is one name
 -- wide and the row is not worth widening for a list that is on its tooltip
 -- anyway, so the column says who is first in line and how many are behind.
@@ -2376,7 +2346,12 @@ function RefreshRollWindow()
             local frac = r.p.grace > 0 and (left / r.p.grace) or 0
             row.rollID = r.id
             row.icon:SetTexture(select(10, GetItemInfo(r.p.link)) or UNKNOWN_ICON)
-            row.text:SetText(r.p.link or ("roll #" .. r.id))
+            -- The same "x2" the log rows carry: how many are on offer is part
+            -- of what you are answering, and the roll knows it.
+            row.text:SetText(r.p.link
+                and ((r.p.count or 1) > 1
+                     and (r.p.link .. " |cffffffffx" .. r.p.count .. "|r") or r.p.link)
+                or ("roll #" .. r.id))
             row.action:SetText("|cffffd100" .. (ACTION_SHORT[r.p.action] or "?") .. "|r")
             row.secs:SetText(("%ds"):format(math.ceil(left)))
 
@@ -2409,11 +2384,10 @@ function RefreshRollWindow()
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
-            if not e.winner and not e.stack and e.res then
+            if not e.winner and e.res then
                 row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
-                row.who:SetText("|cff808080"
-                    .. (e.winner or (e.stack and "stacked") or "nobody") .. "|r")
+                row.who:SetText("|cff808080" .. (e.winner or "nobody") .. "|r")
             end
             row:Show()
         else
@@ -2477,9 +2451,10 @@ end
 -- The one door in from ProcessRoll. Timing is C_Timer's job rather than the
 -- window's, so a roll still fires on time with the window closed, the game
 -- paused on a loading screen, or the row scrolled out of sight.
-function AddPendingRoll(rollID, action, link, grace)
+function AddPendingRoll(rollID, action, link, grace, count)
     pendingRolls[rollID] = {
         action = action, link = link, itemID = ItemID(link),
+        count = count or 1,
         grace = grace, deadline = GetTime() + grace,
     }
     suppressed[rollID] = true
@@ -2878,16 +2853,13 @@ end
 -- the last one. The drop log keeps all of it, which is what the drop log is
 -- for.
 
--- What to draw: the burst, newest first, stacks split per winner the way the
--- other windows split them.
+-- What to draw: the burst, newest first.
 function pop.list()
     local out = {}
     for i = #pop.burst, 1, -1 do
-        local e = pop.burst[i]
-        if e.stack then SplitStack(e, out) else out[#out + 1] = e end
+        out[#out + 1] = pop.burst[i]
         if #out >= pop.MAX_HELD then break end
     end
-    while #out > pop.MAX_HELD do out[#out] = nil end
     return out
 end
 
@@ -3083,11 +3055,10 @@ function pop.refresh()
                 or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
-            if not e.winner and not e.stack and e.res then
+            if not e.winner and e.res then
                 row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
-                row.who:SetText("|cff808080"
-                    .. (e.winner or (e.stack and "stacked") or "nobody") .. "|r")
+                row.who:SetText("|cff808080" .. (e.winner or "nobody") .. "|r")
             end
             row:Show()
         else
@@ -3355,6 +3326,31 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if type(db.loot) ~= "table" then db.loot = {} end
         db.loot.entries = db.loot.entries or {}
         db.loot.money   = db.loot.money or 0
+
+        -- A stack used to be one row per item with a running total and a tally
+        -- of who took how many, split back out per winner only when it was
+        -- drawn. Stacks are logged a drop at a time now, so a file written
+        -- before that is split once, here, and the tally is done with.
+        local rows = {}
+        for _, e in ipairs(db.loot.entries) do
+            local by = e.stack and e.by
+            if by then
+                local names = {}
+                for who in pairs(by) do names[#names + 1] = who end
+                table.sort(names)
+                for _, who in ipairs(names) do
+                    rows[#rows + 1] = { id = e.id, link = e.link, count = by[who],
+                                        winner = who, q = e.q, t = e.t }
+                end
+            else
+                -- Older still: a total with nothing to say where it went, so
+                -- it keeps the total and reads as a drop nobody took, which is
+                -- as close to the truth as the row can get.
+                e.stack, e.by = nil, nil
+                rows[#rows + 1] = e
+            end
+        end
+        db.loot.entries = rows
 
         -- Last, so the preset it makes on a first run under this version is a
         -- copy of the settings after every migration above has run, not of the

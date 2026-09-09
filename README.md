@@ -168,8 +168,8 @@ Off by default. **Loot window** at the bottom of the options panel cycles throug
 │▓[Heart of Darkness] x2░░░░░░░░░░░░░ Pass   1s░│   ← red, nearly out
 ├───────────────────────────────────────────────┤
 │ Bloodfist Helmet ..................... Isaari │
-│ Mark of the Illidari x59 ............ stacked │
-│ Linen Cloth x5 ...................... stacked │
+│ Heart of Darkness x2 ................. nobody │
+│ Mark of the Illidari x12 ............ Perhorn │
 └──────────────────────────────────────────────◢┘
 ```
 
@@ -240,6 +240,8 @@ That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else t
 
 So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
 
+The roll says how many dropped as well as what did, so a stack is a drop like any other: a row when it drops, reading `nobody`, with the number that dropped on it and a name once somebody loots it. Ten hearts off a night of trash are ten rows, not one row reading `x10`.
+
 **One consequence worth knowing:** solo, nothing is ever rolled for, so nothing is logged. The log is a record of what the group was offered, not of what you picked up.
 
 **Show filters what you are looking at, not what gets kept.** Everything that qualifies goes into the log; the threshold on the right-click menu decides how far down the list you want to see. Set it to Rare for a raid night and the greens are still there when you set it back.
@@ -249,9 +251,9 @@ A threshold on the way in would throw away rows you could never ask for again; a
 Two more things follow:
 
 - **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
-- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. If the same item drops off two mobs seconds apart, two winners could in principle land on the wrong rows. It is cosmetic when it happens.
+- **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. A row waiting on the same number as the message wins over an older one, which is what tells two stacks of the same item apart. If the same item drops off two mobs seconds apart, two winners could in principle still land on the wrong rows. It is cosmetic when it happens.
 
-The log holds 1000 rows and drops the oldest beyond that. Stackables collapse to one row each, so it is really a count of one-off drops — a long while, now that it only holds what was rolled for. It is shared across all your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
+The log holds 1000 rows and drops the oldest beyond that — a long while, now that it only holds what was rolled for. It is shared across all your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
 
 ### Drop popup
 

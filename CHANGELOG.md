@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.8.1] - 2026-09-09
+
+### Fixed
+- A stack shows up when it drops, like everything else. A stackable used to be
+  held back until somebody looted it, on the grounds that the loot message was
+  the only thing that knew how many had dropped -- so an epic mat off a trash
+  pull put nothing in the window and nothing in the popup until it was already
+  somebody's. The roll knows: `GetLootRollItemInfo` says how many as well as
+  what. So a stack gets its row when it is offered, reads `nobody` until a name
+  arrives, and is counted once rather than from both ends.
+- A stack says what dropped rather than the night's tally. Stacks used to
+  collapse into one row per item with a running total, which is why the popup --
+  a window whose whole subject is what just dropped -- would announce
+  `[Heart of Darkness] x10` for a drop of two. Every drop has its own row now,
+  with the number that dropped on it and one winner behind it, the way a
+  one-off drop always has. A saved log written before this is split back out
+  into the row per winner it recorded, so the night's history survives the
+  change.
+- A loot message prefers a row waiting on the same number over the oldest one,
+  so two stacks of the same item in the air at once do not swap counts.
+- A roll counting down says how many are on offer, the way the rows below it
+  always have. The number was never on the pending row because nothing had
+  asked the roll for it; a stack of two and a stack of twenty are not the same
+  question, and now they do not look like it.
+
 ## [1.8.0] - 2026-09-08
 
 ### Added
