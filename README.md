@@ -276,6 +276,7 @@ This is the opposite. It appears when something drops, says what it was, and goe
 | | |
 | --- | --- |
 | Appears | When something drops that the **Show** threshold lets through |
+| Once per drop | A winner's name landing on a drop already shown does not bring it back — it is redrawn in place if the window is still up, and nothing more |
 | A whole pack | Each drop puts the clock back to the full time, so a pull arrives as one window rather than as five |
 | Goes | When the drops stop and the time runs out |
 | Emptied | On the way out, so the next pull opens on a clean window rather than the tail of the last one |

@@ -1075,9 +1075,15 @@ end
 -- `entry` is the log row that changed, and nil means the log was emptied
 -- rather than added to. The windows redraw either way; the popup only has
 -- something to appear about when there is a row.
-local function LootChanged(entry)
+--
+-- `filled` is that row having been completed rather than added: a name landing
+-- on a drop already logged, or its reserves. That is not a new drop and must
+-- not read as one -- a popup that has been and gone coming back when somebody
+-- loots the corpse says "this dropped" a second time, about an item that only
+-- dropped once, which is exactly the wrong thing to tell a raid.
+local function LootChanged(entry, filled)
     RefreshRollWindow()
-    pop.wake(entry)
+    if filled then pop.update(entry) else pop.wake(entry) end
 end
 
 -- winner nil means "this dropped, nobody has won it yet". `offered` is
@@ -1140,7 +1146,7 @@ function LogDrop(link, count, winner, offered)
         local row = exact or oldest
         if row then
             row.winner, row.count = winner, n
-            LootChanged(row)
+            LootChanged(row, true)
             return
         end
         entries[#entries + 1] =
@@ -1222,7 +1228,7 @@ function LogAnnounced(link, reserves)
         if reserves and lastAnnounced
             and (time() - lastAnnouncedAt) <= ANNOUNCE_PAIR_WINDOW then
             lastAnnounced.res = reserves
-            LootChanged(lastAnnounced)
+            LootChanged(lastAnnounced, true)
         end
         return
     end
@@ -1241,7 +1247,7 @@ function LogAnnounced(link, reserves)
             and (time() - e.t) <= LOOT_MATCH_WINDOW then
             if reserves then e.res = reserves end
             lastAnnounced, lastAnnouncedAt = e, time()
-            LootChanged(e)
+            LootChanged(e, true)
             return
         end
     end
@@ -3056,6 +3062,22 @@ function pop.layout()
     for _, row in ipairs(pop.rows) do
         row:SetWidth(w - pop.PAD * 2)
         row.text:SetWidth(w - pop.PAD * 2 - pop.ROW_H - 95)
+    end
+end
+
+-- A row already on show has changed: the name has arrived on a drop the
+-- window is still holding, or the reserves have. Redrawn in place and nothing
+-- more -- the window is not opened for it, and its clock is not put back,
+-- because neither the drop nor the wait for it started again.
+--
+-- Nothing to do if the popup has already been and gone: the drop was shown
+-- when it dropped, which is what this window is for, and who ended up with it
+-- is the loot window's business.
+function pop.update(entry)
+    if not entry then return end
+    if not pop.frame or not pop.frame:IsShown() then return end
+    for _, e in ipairs(pop.burst) do
+        if e == entry then pop.refresh() return end
     end
 end
 

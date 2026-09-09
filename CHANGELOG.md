@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.2] - 2026-09-09
+
+### Fixed
+- A drop appears once. The popup shows an item when it drops, before anybody
+  has won it, and goes when the time runs out -- and then the loot message
+  naming the winner was bringing it back for another few seconds, which reads
+  as the item having dropped a second time. It had not. A name landing on a
+  drop already logged is that row being completed rather than a new drop: it is
+  redrawn in place if the popup happens to still be up, the clock is not put
+  back, and a popup that has been and gone stays gone. The same goes for a
+  "Reserved by" line arriving after its item. Who ended up with what is the
+  loot window's business, and that window is updated either way.
+
 ## [1.8.1] - 2026-09-09
 
 ### Changed
