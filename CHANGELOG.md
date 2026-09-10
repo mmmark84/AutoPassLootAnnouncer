@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.9.0] - 2026-09-10
+
+### Changed
+- What goes in front of an announced drop is one setting with three choices
+  rather than a prefix with a pepe checkbox over it: **Prefix**, **Pepe**, or
+  the new **Random**. Only one thing can lead a line, and a pepe and a prefix
+  stacked on the same announce read as noise rather than as two settings, so
+  the panel asks it once -- a cycle button under the prefix box, the way
+  **At login** works. Pepe mode no longer prints your prefix as well.
+  - **Random** picks a line from fifty: `Ooh, a piece of candy!`,
+    `Another one.`, `Ooh, shiny!`, `Mine! Mine! Mine!`,
+    `The boss dropped its wallet:` and so on. Plain text, so unlike a pepe it
+    reads the same for everyone whatever they are running, and a different one
+    each drop.
+  - The prefix box stays editable in the other two modes -- it is what you go
+    back to -- but is dimmed, because nothing is being announced with it.
+  - A saved file with pepe mode ticked comes across as **Pepe**; everything
+    else keeps its prefix. Presets carry the mode, and so do share codes, in a
+    new `sm` field. A code written by 1.8 or earlier is read through its old
+    `pe` flag, and a code written now still carries `pe` so those versions read
+    this one.
+- `/apla mode prefix|pepe|random` sets it (`/apla say` also works). `/apla pepe`
+  still answers, and flips between pepe and your prefix.
+- The panel is grouped by subject rather than by the order things were added
+  to it. Rolling first -- **Roll automatically**, **At login**, the minimap
+  checkbox, then the roll grid and its summary -- then the two windows, and
+  the announcing settings last as one block: **Announce to chat**, both
+  sliders, **Chat prefix** and **Say it with**. Nothing changed but where the
+  rows are.
+- The panel is as tall as its rows come to. The roll summary grows a line every
+  time the roll table needs another one, so everything below it is anchored to
+  its bottom and the frame is resized to fit: a wordy roll table used to run
+  under whatever was beneath it.
+
 ## [1.8.2] - 2026-09-09
 
 ### Fixed

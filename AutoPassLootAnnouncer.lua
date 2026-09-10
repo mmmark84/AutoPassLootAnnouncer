@@ -27,7 +27,8 @@ local defaults = {
     -- 2 greed, rare and up only. Built in ADDON_LOADED because a table in
     -- `defaults` would be shared by reference.
     prefix       = "Drop:",
-    pepe         = false,  -- prepend a random happy pepe to every announce
+    sayMode      = "prefix",  -- what goes in front of the item: your prefix, a
+                              -- random happy pepe, or a random silly phrase
     loginArm     = "off",  -- what automated rolling does at login: off / on / ask.
                            -- Account-wide, not per preset: it is a question about
                            -- this session rather than about a role, and when it is
@@ -52,7 +53,7 @@ local defaults = {
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
 local PRESET_KEYS = {
-    "announce", "channel", "minQuality", "prefix", "pepe", "hud", "grace", "popup",
+    "announce", "channel", "minQuality", "prefix", "sayMode", "hud", "grace", "popup",
     "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
 }
 
@@ -165,6 +166,27 @@ local function ActionKey(bop, stackable)
     return stackable and "actionsBoEStack" or "actionsBoE"
 end
 
+-- What goes in front of the item link, as one setting rather than as a
+-- checkbox per idea: only one thing can lead a line, and stacking a pepe, a
+-- phrase and a prefix onto one announce reads as noise rather than as three
+-- settings. So it is a straight choice of the three.
+local SAY_MODES = { "prefix", "pepe", "random" }
+local SAY_MODE_LABEL = { prefix = "Prefix", pepe = "Pepe", random = "Random" }
+
+local function NextSayMode(cur)
+    for i, v in ipairs(SAY_MODES) do
+        if v == cur then return SAY_MODES[i % #SAY_MODES + 1] end
+    end
+    return SAY_MODES[1]
+end
+
+-- nil rather than a default for anything that is not one of the three, so the
+-- caller can tell "not set" from "set to prefix" and fall back to whatever it
+-- has to fall back on -- an older pepe flag, or the default.
+local function ValidSayMode(v)
+    return SAY_MODE_LABEL[v] and v or nil
+end
+
 -- Pepe mode. Twitch Emotes 2.0 swaps these words for pictures on the reading
 -- end, so anyone without that addon sees the bare word instead. Picked by
 -- looking at the artwork rather than trusting the names, since plenty of
@@ -182,14 +204,92 @@ local PEPE_HAPPY = {
     "PepeHeart", "PepeLove", "PepeHug", "pepeKingLove",
 }
 
-local lastPepe
-local function RandomPepe()
-    local pick = PEPE_HAPPY[math.random(#PEPE_HAPPY)]
-    if pick == lastPepe then
-        pick = PEPE_HAPPY[math.random(#PEPE_HAPPY)]   -- one re-roll, so it rarely doubles up
+-- Random mode. Plain text, so it reads the same for everyone whatever they
+-- have installed, which is the difference between this and pepe mode. Kept
+-- short enough to leave room for the item link on one chat line, and kept
+-- clean: this goes out to a raid of strangers under your name.
+local RANDOM_LINES = {
+    "Ooh, a piece of candy!",
+    "Another one.",
+    "Ooh, shiny!",
+    "My precious...",
+    "Mine! Mine! Mine!",
+    "It's dangerous to go alone, take this:",
+    "A wild item appeared:",
+    "Well well well, look at this:",
+    "And there it is:",
+    "Behold!",
+    "Feast your eyes:",
+    "Look what the boss coughed up:",
+    "The boss dropped its wallet:",
+    "Christmas came early:",
+    "Delivery for the raid:",
+    "Attention shoppers:",
+    "Fresh out of the boss:",
+    "Somebody order this?",
+    "For me? You shouldn't have.",
+    "I'll take that, thank you.",
+    "Yoink!",
+    "Cha-ching!",
+    "Ding!",
+    "Jackpot!",
+    "Winner winner:",
+    "Nice.",
+    "Not bad. Not bad at all.",
+    "That'll do nicely:",
+    "Now that's what I call loot:",
+    "Certified banger:",
+    "Big loot energy:",
+    "Loot goblin activated:",
+    "Straight to the auction house:",
+    "The RNG gods have spoken:",
+    "Guess what dropped:",
+    "Say hello to:",
+    "Somebody's getting an upgrade:",
+    "Roll for it, cowards:",
+    "Gimme gimme gimme:",
+    "Wow. Such loot.",
+    "Sheesh:",
+    "Rare candy:",
+    "Look Mom, I found something:",
+    "Shut up and take my gold:",
+    "One does not simply pass on this:",
+    "Yippee!",
+    "Sweet, sweet loot:",
+    "Loot check:",
+    "Hey look, an item!",
+    "May I present:",
+}
+
+-- One re-roll when the pick repeats the last one, so it rarely doubles up.
+-- Both lists want it, and neither wants to remember more than the last pick:
+-- shuffling a bag would stop repeats entirely, and would also mean the same
+-- fifty lines in a fixed cycle, which reads as scripted rather than as random.
+local function PickFresh(list, last)
+    local pick = list[math.random(#list)]
+    if pick == last and #list > 1 then
+        pick = list[math.random(#list)]
     end
-    lastPepe = pick
     return pick
+end
+
+local lastPepe, lastLine
+local function RandomPepe()
+    lastPepe = PickFresh(PEPE_HAPPY, lastPepe)
+    return lastPepe
+end
+
+local function RandomLine()
+    lastLine = PickFresh(RANDOM_LINES, lastLine)
+    return lastLine
+end
+
+-- What leads an announce, or nil for nothing in front of the item at all.
+local function SayLead()
+    if db.sayMode == "pepe" then return RandomPepe() end
+    if db.sayMode == "random" then return RandomLine() end
+    if db.prefix and db.prefix ~= "" then return db.prefix end
+    return nil
 end
 
 local function QualityLabel(v)
@@ -382,6 +482,13 @@ local function EnsurePresets()
     -- last on had set.
     for _, p in ipairs(db.presets) do p.values.loginArm = nil end
 
+    -- and the same for the pepe checkbox each preset was carrying
+    for _, p in ipairs(db.presets) do
+        local v = p.values
+        v.sayMode = ValidSayMode(v.sayMode) or (v.pepe and "pepe") or "prefix"
+        v.pepe = nil
+    end
+
     db.activePreset = tonumber(db.activePreset) or 1
     if not db.presets[db.activePreset] then db.activePreset = 1 end
 end
@@ -543,7 +650,11 @@ local function EncodePreset(name, v)
         ("a=%d"):format(v.announce and 1 or 0),
         ("c=%d"):format(tonumber(v.channel) or defaults.channel),
         ("q=%d"):format(tonumber(v.minQuality) or defaults.minQuality),
-        ("pe=%d"):format(v.pepe and 1 or 0),
+        -- The mode by name: it is a word either way, since prefix and pepe
+        -- share a first letter. pe= goes out alongside it for 1.8 and
+        -- earlier, which knew pepe as a checkbox and nothing else.
+        ("sm=%s"):format(ValidSayMode(v.sayMode) or defaults.sayMode),
+        ("pe=%d"):format(v.sayMode == "pepe" and 1 or 0),
         ("tq=%d"):format(tonumber(v.trackMin) or defaults.trackMin),
         ("h=%d"):format(v.hud and 1 or 0),
         ("g=%d"):format(tonumber(v.grace) or defaults.grace),
@@ -590,7 +701,8 @@ local function DecodePreset(code)
         announce   = flag("a", defaults.announce),
         channel    = num("c", 1, 4, defaults.channel),
         minQuality = num("q", 0, 5, defaults.minQuality),
-        pepe       = flag("pe", defaults.pepe),
+        sayMode    = ValidSayMode(f.sm and f.sm:lower()) or (flag("pe", false) and "pepe")
+                        or defaults.sayMode,
         trackMin   = num("tq", MIN_TRACK, 5, defaults.trackMin),
         hud        = flag("h", defaults.hud),
         grace      = num("g", 0, 60, defaults.grace),
@@ -721,13 +833,10 @@ function SayList(links, force)
         return
     end
     for _, link in ipairs(links) do
-        -- pepe first, then your prefix, then the item. Each part is space
-        -- separated because Twitch Emotes only matches whole words.
-        local parts = {}
-        if db.pepe then tinsert(parts, RandomPepe()) end
-        if db.prefix and db.prefix ~= "" then tinsert(parts, db.prefix) end
-        tinsert(parts, link)
-        Say(table.concat(parts, " "))
+        -- Whatever leads the line, then the item. Space separated because
+        -- Twitch Emotes only matches a pepe as a whole word.
+        local lead = SayLead()
+        Say(lead and (lead .. " " .. link) or link)
     end
 end
 
@@ -1624,11 +1733,14 @@ end
 -- adding the bar cost one number rather than every coordinate underneath it.
 local PRESET_BAR_H = 34
 
--- The bar of buttons across the bottom. Without it they sat on top of the
--- last checkbox, which is what the panel used to end with. Two rows since the
--- popup became a window of its own: the panel is 340 wide and two cycle
--- buttons do not sit beside each other in what is left of that next to Test.
-local BOTTOM_BAR_H = 52
+-- What the panel starts at. It ends up whatever its rows come to -- the roll
+-- summary is as tall as the roll table is wordy, and everything under it is
+-- anchored to its bottom -- so this is only the height it is born with, before
+-- the first sizing pass.
+local PANEL_H = 574
+
+-- Margin under the last row.
+local PANEL_PAD = 14
 
 local presetCode           -- the share-code window, built alongside the panel
 local TogglePresetCode     -- defined with it, used by the panel and the menu
@@ -1857,9 +1969,23 @@ function TogglePresetCode()
     if presetCode:IsShown() then presetCode:Hide() else presetCode:Show() end
 end
 
+-- As tall as its rows, no taller: the last row is the Say it with button, and
+-- what moves is the roll summary above it, which grows a line every time the
+-- roll table needs another one. Called after the panel is built and again
+-- whenever that summary is rewritten.
+local function SizePanel()
+    if not (panel and panel.sayMode) then return end
+    local top, bottom = panel:GetTop(), panel.sayMode:GetBottom()
+    -- Both are nil until the frame has a position to be measured from. It has
+    -- one from birth, being anchored to the screen, but a client that answers
+    -- differently gets the height it was built with rather than an error.
+    if not (top and bottom) then return end
+    panel:SetHeight(top - bottom + PANEL_PAD)
+end
+
 local function BuildPanel()
     panel = CreateFrame("Frame", "AutoPassLootAnnouncerPanel", UIParent, "BasicFrameTemplateWithInset")
-    panel:SetSize(340, 488 + PRESET_BAR_H + BOTTOM_BAR_H)
+    panel:SetSize(340, PANEL_H)
     panel:SetPoint("CENTER")
     panel:SetMovable(true)
     panel:EnableMouse(true)
@@ -1930,27 +2056,18 @@ local function BuildPanel()
         "|cffffd100Ask|r - a prompt each time, so it is never on without you saying so.",
     })
 
-    panel.announce = MakeCheck(body, "APLACheckAnnounce", "Announce to chat", 16, -60,
-        "Off = print to your own chat frame only, nothing is sent to the group.",
-        function(v) db.announce = v; SendHello(true) end)
 
-    panel.minimap = MakeCheck(body, "APLACheckMinimap", "Show minimap button", 16, -86,
+    panel.minimap = MakeCheck(body, "APLACheckMinimap", "Show minimap button", 16, -60,
         nil,
         function(v)
             db.minimapHide = not v
             if v then button:Show() else button:Hide() end
         end)
 
-    panel.chSlider = MakeSlider(body, "APLAChannelSlider", -126, 1, 4, "Say", "Yell",
-        "Announce up to: ", function(v) return CHANNEL_NAME[v] end,
-        function(v) db.channel = v end)
-    panel.chSlider.tooltipText = "The widest channel to use. It steps down to whatever is actually available: set to Raid, you get raid in a raid and party in a party."
 
-    panel.slider = MakeSlider(body, "APLAQualitySlider", -170, 0, 5, "Poor", "Legendary",
-        "Announce: ", MinLabel, function(v) db.minQuality = v end)
 
     panel.summary = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    panel.summary:SetPoint("TOPLEFT", 24, -326)
+    panel.summary:SetPoint("TOPLEFT", 24, -208)
     panel.summary:SetWidth(292)
     panel.summary:SetJustifyH("LEFT")
 
@@ -1967,6 +2084,7 @@ local function BuildPanel()
             end
         end
         panel.summary:SetText(ActionSummary())
+        SizePanel()   -- the summary just changed height; the panel follows it
     end
 
     function SelectQuality(q)
@@ -1984,7 +2102,7 @@ local function BuildPanel()
     panel.SelectQuality = SelectQuality
 
     local gridHead = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    gridHead:SetPoint("TOPLEFT", 24, -196)
+    gridHead:SetPoint("TOPLEFT", 24, -96)
     gridHead:SetText("What to do with each roll   |cff808080(below "
         .. QUALITY_NAME[MIN_ACTION_QUALITY]:lower() .. ": left alone)|r")
 
@@ -2006,7 +2124,7 @@ local function BuildPanel()
     panel.tabs = {}
     for q = MIN_ACTION_QUALITY, 5 do
         local tb = MakeTab(body, TAB_W, TAB_H, QUALITY_NAME[q])
-        tb:SetPoint("TOPLEFT", 22 + (q - MIN_ACTION_QUALITY) * (TAB_W + 3), -212)
+        tb:SetPoint("TOPLEFT", 22 + (q - MIN_ACTION_QUALITY) * (TAB_W + 3), -112)
         tb:SetScript("OnClick", function() SelectQuality(q) end)
         panel.tabs[q] = tb
     end
@@ -2014,15 +2132,15 @@ local function BuildPanel()
     -- a rule across the full width, so the active tab reads as sitting on the
     -- section it opens rather than floating above it
     local tabRule = body:CreateTexture(nil, "BACKGROUND")
-    tabRule:SetPoint("TOPLEFT", 22, -236)
-    tabRule:SetPoint("TOPRIGHT", -22, -236)
+    tabRule:SetPoint("TOPLEFT", 22, -136)
+    tabRule:SetPoint("TOPRIGHT", -22, -136)
     tabRule:SetHeight(1)
     Fill(tabRule, 1, 1, 1, 0.12)
 
     local COLX = { 150, 195, 240, 285 }
     for i, a in ipairs(ACTIONS) do
         local h = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        h:SetPoint("TOP", body, "TOPLEFT", COLX[i] + 8, -244)
+        h:SetPoint("TOP", body, "TOPLEFT", COLX[i] + 8, -144)
         h:SetText(a.label)
     end
 
@@ -2030,7 +2148,7 @@ local function BuildPanel()
     -- are showing. Each carries a hover explaining what lands in it.
     panel.rows = {}
     for r, kind in ipairs(KINDS) do
-        local y = -260 - (r - 1) * 20
+        local y = -160 - (r - 1) * 20
         local row = { key = kind.key, buttons = {} }
 
         row.label = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2058,40 +2176,15 @@ local function BuildPanel()
 
     SelectQuality(4)   -- epic is the one people actually come here to set
 
-    local prefixLabel = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    prefixLabel:SetPoint("TOPLEFT", 24, -398)
-    prefixLabel:SetText("Chat prefix")
 
-    local edit = CreateFrame("EditBox", "APLAPrefixEdit", body, "InputBoxTemplate")
-    edit:SetPoint("TOPLEFT", 96, -394)
-    edit:SetSize(190, 20)
-    edit:SetAutoFocus(false)
-    -- Commit on focus lost, not only on Enter. Clicking Test does not press
-    -- Enter for you, and reverting the box there threw away what you typed
-    -- while leaving it on screen, so the prefix looked applied but was not.
-    edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    edit:SetScript("OnEditFocusLost", function(self) db.prefix = self:GetText() end)
-    edit:SetScript("OnEscapePressed", function(self)
-        self:SetText(db.prefix)   -- Escape is the one way to discard an edit
-        self:ClearFocus()
-    end)
-    panel.edit = edit
-
-    -- Ask the client for the link instead of writing an item string by hand.
-    -- A hand-written one is short of the fields this client emits, and the
-    -- server drops a chat message carrying a malformed link without a word,
-    -- so Test did nothing in a group while printing fine when solo.
-    panel.pepe = MakeCheck(body, "APLACheckPepe", "Pepe mode", 16, -446,
-        "Puts a random happy pepe in front of the prefix. It shows as a picture for anyone running "
-            .. "Twitch Emotes 2.0; everyone else sees the emote name as plain text.",
-        function(v) db.pepe = v end)
-
-    -- On the bottom bar rather than a row of its own: the panel is already as
-    -- tall as some people's screens, and this is a cycle button like At login
-    -- rather than anything that wants a slider's width.
+    -- Hung off the summary rather than placed under it. The summary is the one
+    -- thing on the panel whose height depends on what it says, so everything
+    -- below it is anchored to its bottom and the panel is sized to whatever
+    -- that comes to. At a fixed offset instead, a wordy roll table would draw
+    -- straight through these buttons.
     panel.hud = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     panel.hud:SetSize(180, 22)
-    panel.hud:SetPoint("BOTTOMLEFT", 16, 38)
+    panel.hud:SetPoint("TOPLEFT", panel.summary, "BOTTOMLEFT", -8, -14)
     panel.hud:SetScript("OnClick", function()
         local step = NextHud(db.hud, db.grace)
         db.hud, db.grace = step.hud, step.grace
@@ -2117,7 +2210,7 @@ local function BuildPanel()
     -- is nothing to walk through but how long it stays.
     panel.popup = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     panel.popup:SetSize(180, 22)
-    panel.popup:SetPoint("BOTTOMLEFT", 16, 12)
+    panel.popup:SetPoint("TOPLEFT", panel.hud, "TOPLEFT", 0, -26)
     panel.popup:SetScript("OnClick", function()
         db.popup = pop.next(db.popup)
         RefreshPanel()
@@ -2149,10 +2242,10 @@ local function BuildPanel()
 
     local test = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     test:SetSize(80, 22)
-    test:SetPoint("BOTTOMRIGHT", -12, 12)
+    test:SetPoint("TOPLEFT", panel.popup, "TOPRIGHT", 52, 0)
     test:SetText("Test")
     test:SetScript("OnClick", function()
-        edit:ClearFocus()
+        panel.edit:ClearFocus()   -- commit a prefix typed but never entered
         pop.demo()
     end)
     AttachTooltip(test, "Test", {
@@ -2161,6 +2254,80 @@ local function BuildPanel()
         "None of it is real: nothing is announced, nothing is rolled for, and nothing goes into "
             .. "the drop log.",
     })
+
+    panel.announce = MakeCheck(body, "APLACheckAnnounce", "Announce to chat", 16, 0,
+        "Off = print to your own chat frame only, nothing is sent to the group.",
+        function(v) db.announce = v; SendHello(true) end)
+    panel.announce:ClearAllPoints()
+    panel.announce:SetPoint("TOPLEFT", panel.popup, "BOTTOMLEFT", 0, -16)
+
+    panel.chSlider = MakeSlider(body, "APLAChannelSlider", 0, 1, 4, "Say", "Yell",
+        "Announce up to: ", function(v) return CHANNEL_NAME[v] end,
+        function(v) db.channel = v end)
+    panel.chSlider:ClearAllPoints()
+    panel.chSlider:SetPoint("TOPLEFT", panel.announce, "TOPLEFT", 8, -40)
+    panel.chSlider.tooltipText = "The widest channel to use. It steps down to whatever is actually available: set to Raid, you get raid in a raid and party in a party."
+
+    panel.slider = MakeSlider(body, "APLAQualitySlider", 0, 0, 5, "Poor", "Legendary",
+        "Announce: ", MinLabel, function(v) db.minQuality = v end)
+    -- Top to top, at the gap these two have always had: a slider carries its
+    -- caption above the bar and its end labels below it, so measuring from one
+    -- bottom to the next top would be measuring the wrong thing.
+    panel.slider:ClearAllPoints()
+    panel.slider:SetPoint("TOPLEFT", panel.chSlider, "TOPLEFT", 0, -44)
+
+    -- The last two announce settings. Everything from the checkbox above down
+    -- to here decides what gets announced and how it reads; the roll grid and
+    -- the two windows above have nothing to do with either, which is the order
+    -- the panel is in.
+    local edit = CreateFrame("EditBox", "APLAPrefixEdit", body, "InputBoxTemplate")
+    edit:SetPoint("TOPLEFT", panel.slider, "TOPLEFT", 72, -36)
+    edit:SetSize(190, 20)
+    edit:SetAutoFocus(false)
+    -- Commit on focus lost, not only on Enter. Clicking Test does not press
+    -- Enter for you, and reverting the box there threw away what you typed
+    -- while leaving it on screen, so the prefix looked applied but was not.
+    edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    edit:SetScript("OnEditFocusLost", function(self) db.prefix = self:GetText() end)
+    edit:SetScript("OnEscapePressed", function(self)
+        self:SetText(db.prefix)   -- Escape is the one way to discard an edit
+        self:ClearFocus()
+    end)
+    panel.edit = edit
+
+    local prefixLabel = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    prefixLabel:SetPoint("TOPLEFT", edit, "TOPLEFT", -72, -4)
+    prefixLabel:SetText("Chat prefix")
+    panel.prefixLabel = prefixLabel
+
+    -- A cycle button rather than three radio buttons, for the same reason At
+    -- login is one: three mutually exclusive settings on one row, and the
+    -- panel has no height going spare.
+    panel.sayMode = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
+    panel.sayMode:SetSize(190, 22)
+    panel.sayMode:SetPoint("TOPLEFT", edit, "TOPLEFT", 0, -28)
+
+    panel.sayLabel = body:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    panel.sayLabel:SetPoint("TOPLEFT", panel.sayMode, "TOPLEFT", -72, -4)
+    panel.sayLabel:SetText("Say it with")
+    panel.sayMode:SetScript("OnClick", function()
+        edit:ClearFocus()   -- so a prefix you just typed is committed, not lost
+        db.sayMode = NextSayMode(db.sayMode)
+        RefreshPanel()
+    end)
+    AttachTooltip(panel.sayMode, "Say it with", {
+        "What goes in front of the item when a drop is announced. Click to cycle.",
+        "|cffffd100Prefix|r - the text in the box above, and nothing else.",
+        "|cffffd100Pepe|r - a random happy pepe instead of the prefix. It shows as a picture "
+            .. "for anyone running Twitch Emotes 2.0; everyone else sees the emote name as "
+            .. "plain text.",
+        "|cffffd100Random|r - a random silly line from a list of fifty, plain text, so it reads "
+            .. "the same for everyone. A different one each drop.",
+        "One or the other, never two at once: only one thing can lead a line, and all three "
+            .. "stacked up reads as noise.",
+    })
+
+    SizePanel()
 end
 
 function RefreshPanel()
@@ -2168,7 +2335,6 @@ function RefreshPanel()
     panel.pass:SetChecked(db.autopass)
     panel.announce:SetChecked(db.announce)
     panel.minimap:SetChecked(not db.minimapHide)
-    panel.pepe:SetChecked(db.pepe)
     panel.loginArm:SetText("At login: " .. (LOGIN_ARM_LABEL[db.loginArm] or "Off"))
     panel.hud:SetText("Loot window: " .. HudLabel(db.hud, db.grace))
     panel.popup:SetText("Drop popup: " .. pop.label(db.popup))
@@ -2176,6 +2342,13 @@ function RefreshPanel()
     panel.slider:SetValue(db.minQuality)
     panel.SelectQuality(panel.quality or 4)
     panel.edit:SetText(db.prefix)
+    panel.sayMode:SetText(SAY_MODE_LABEL[db.sayMode] or SAY_MODE_LABEL.prefix)
+    -- The prefix box is still yours to edit in the other two modes -- it is
+    -- what you go back to -- but dimmed, because nothing is being announced
+    -- with it right now.
+    local usingPrefix = (db.sayMode == "prefix")
+    panel.prefixLabel:SetAlpha(usingPrefix and 1 or 0.4)
+    panel.edit:SetAlpha(usingPrefix and 1 or 0.4)
     UpdateButtonLook()
 end
 
@@ -3320,6 +3493,12 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- logged now, so a stored 0 or 1 is a setting with no row to tick.
         if (tonumber(db.trackMin) or 0) < MIN_TRACK then db.trackMin = MIN_TRACK end
 
+        -- Pepe used to be a checkbox on top of the prefix. It is one of three
+        -- things that can lead a line now, so a file that had it ticked comes
+        -- across as pepe mode and one that did not keeps its prefix.
+        db.sayMode = ValidSayMode(db.sayMode) or (db.pepe and "pepe") or "prefix"
+        db.pepe = nil
+
         if type(db.actionsBoP) ~= "table" or type(db.actionsBoE) ~= "table" then
             -- Whatever the last version stored goes to both bind types, so the
             -- upgrade changes nothing until you split the two yourself.
@@ -3671,9 +3850,20 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         else
             print("|cff66ccffAPLA|r /apla grace <0-60>, seconds; 0 answers straight away")
         end
+    elseif cmd == "mode" or cmd == "say" then
+        local m = ValidSayMode(val)
+        if m then
+            db.sayMode = m
+            print("|cff66ccffAPLA|r say it with: " .. SAY_MODE_LABEL[m])
+        else
+            print("|cff66ccffAPLA|r /apla mode prefix|pepe|random (now: "
+                .. (SAY_MODE_LABEL[db.sayMode] or "?") .. ")")
+        end
     elseif cmd == "pepe" then
-        db.pepe = not db.pepe
-        print("|cff66ccffAPLA|r pepe mode: " .. tostring(db.pepe))
+        -- Still here because it was a toggle for six versions: it flips
+        -- between pepe and your prefix, and leaves random to /apla mode.
+        db.sayMode = (db.sayMode == "pepe") and "prefix" or "pepe"
+        print("|cff66ccffAPLA|r say it with: " .. SAY_MODE_LABEL[db.sayMode])
     elseif cmd == "debug" then
         db.debug = not db.debug
         print("|cff66ccffAPLA|r debug: " .. tostring(db.debug))

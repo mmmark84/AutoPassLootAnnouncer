@@ -25,7 +25,7 @@
   <li><strong>Single announcer election</strong> &mdash; when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure</li>
   <li><strong>Never armed between sessions</strong> &mdash; automated rolling starts each login off, on, or behind a prompt, whichever you pick</li>
   <li><strong>Drop tracker</strong> &mdash; an optional log of everything that dropped this session and who won it, kept across logouts until you clear it</li>
-  <li><strong>Pepe mode</strong>, which puts a random cheerful pepe in front of every announcement</li>
+  <li><strong>Say it with</strong> a prefix of your own, a random cheerful pepe, or a random silly line off a list of fifty</li>
 </ul>
 
 <p><img src="https://media.forgecdn.net/attachments/1931/996/options-panel-png.png" alt="Options panel"></p>
@@ -86,13 +86,21 @@
 
 <p>The slider filters <strong>what you are looking at, not what gets kept</strong>. Everything that drops goes in, greys and quest items included, and the slider decides how far down the list you want to see. Drag it up to pull the night's epics out of a wall of vendor trash, drag it back down and they are all still there.</p>
 
-<h3>Pepe mode</h3>
+<h3>Say it with</h3>
 
-<p>Prepends a random happy pepe to each announcement, from 22 of the cheerful ones in <a href="https://www.curseforge.com/wow/addons/twitch-emotes-v2">Twitch Emotes 2.0</a>, never repeating the one it used last.</p>
+<p>What goes in front of the item link is one setting with three choices, cycled by the button under the prefix box. One or the other, never two at once: only one thing can lead a line.</p>
+
+<ul>
+  <li><strong>Prefix</strong> &mdash; <code>Drop: [Cursed Vision of Sargeras]</code></li>
+  <li><strong>Pepe</strong> &mdash; <code>PepePogO [Cursed Vision of Sargeras]</code></li>
+  <li><strong>Random</strong> &mdash; <code>Ooh, a piece of candy! [Cursed Vision of Sargeras]</code></li>
+</ul>
+
+<p><strong>Pepe</strong> picks from 22 of the cheerful ones in <a href="https://www.curseforge.com/wow/addons/twitch-emotes-v2">Twitch Emotes 2.0</a>. What goes out on the wire is the emote's name, so it becomes a picture only for readers who run Twitch Emotes themselves &mdash; everyone else sees the word. That addon is not a dependency and nothing breaks without it.</p>
 
 <p><img src="https://media.forgecdn.net/attachments/1931/995/loot-pepe-png.png" alt="A pepe on an announcement"></p>
 
-<p>What goes out on the wire is the emote's name, so it becomes a picture only for readers who run Twitch Emotes themselves &mdash; everyone else sees the word. That addon is not a dependency and nothing breaks without it.</p>
+<p><strong>Random</strong> picks a line from a list of fifty &mdash; <code>Another one.</code>, <code>Ooh, shiny!</code>, <code>Mine! Mine! Mine!</code>, <code>The boss dropped its wallet:</code> and so on. Plain text, so unlike a pepe it reads the same for everyone whatever they have installed, and a different one each drop.</p>
 
 <h3>Slash commands</h3>
 
@@ -110,7 +118,7 @@
     <tr><td><code>/apla popup</code></td><td>Open or close the loot window</td></tr>
     <tr><td><code>/apla loot</code></td><td>Open or close the drop log</td></tr>
     <tr><td><code>/apla track</code></td><td>Toggle drop tracking</td></tr>
-    <tr><td><code>/apla pepe</code></td><td>Toggle pepe mode</td></tr>
+    <tr><td><code>/apla mode &lt;prefix|pepe|random&gt;</code></td><td>What it says a drop with</td></tr>
     <tr><td><code>/apla who</code></td><td>Show the elected announcer and all peers</td></tr>
   </tbody>
 </table>

@@ -16,7 +16,7 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
 - **Never armed between sessions** — automated rolling starts each login off, on, or behind a prompt, whichever you pick
 - **A drop popup** that appears when something drops, says what it was and goes again — the pack's haul read in the quiet after the pull, never on screen during one
-- **Pepe mode**, which puts a random cheerful pepe in front of every announcement
+- **Say it with** a prefix of your own, a random cheerful pepe, or a random silly line off a list of fifty
 
 ## Screenshots
 
@@ -65,7 +65,7 @@ There is no Save button, deliberately. The live settings **are** the active pres
 
 | | |
 | --- | --- |
-| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, pepe mode, the loot window and its grace period, the drop popup, the Show threshold, and all three roll grids |
+| **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, what it says the drop with, the loot window and its grace period, the drop popup, the Show threshold, and all three roll grids |
 | **Not in a preset** | **At login**, where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
@@ -79,13 +79,13 @@ Two to start from, if you want somewhere to begin. Paste either into the code wi
 **Raider** — pass on everything, but stop on a bind-on-equip that does not stack, because somebody may have been waiting weeks for it. Announce rare and better, up to raid.
 
 ```
-APLA1:n=Raider,a=1,c=3,q=3,pe=0,t=0,tq=2,bop=pppp,boe=pwww,bes=pppp,p=Drop%3A
+APLA1:n=Raider,a=1,c=3,q=3,sm=prefix,pe=0,tq=2,bop=pppp,boe=pwww,bes=pppp,p=Drop%3A
 ```
 
 **Looter** — greed everything, decide epics and legendaries yourself. Announce uncommon and better, up to party, and log what dropped.
 
 ```
-APLA1:n=Looter,a=1,c=2,q=2,pe=0,t=1,tq=2,bop=ggww,boe=gggg,bes=gggg,p=Drop%3A
+APLA1:n=Looter,a=1,c=2,q=2,sm=prefix,pe=0,tq=2,h=1,bop=ggww,boe=gggg,bes=gggg,p=Drop%3A
 ```
 
 A code pasted straight after `/apla preset`, with no keyword, is recognised as one.
@@ -99,7 +99,8 @@ A code pasted straight after `/apla preset`, with no keyword, is recognised as o
 | `a` | Announce to chat, 0 or 1 |
 | `c` | Channel cap, 1 say to 4 yell |
 | `q` | Announce threshold, 0 to 5 |
-| `pe` | Pepe mode |
+| `sm` | What it says a drop with: `prefix`, `pepe` or `random` |
+| `pe` | Pepe on or off, written for 1.8 and earlier only. A code from one of those versions is read through it when there is no `sm` |
 | `tq` | The Show threshold |
 | `h` | Loot window on or off |
 | `g` | Grace period in seconds, 0 for none |
@@ -319,11 +320,23 @@ Two settings: **Announce** sets the minimum quality, **Announce up to** sets the
 | Raid | raid | party | own chat frame |
 | Yell | yell | yell | yell |
 
-### Pepe mode
+### Say it with
 
-Pepe mode prepends a random happy pepe to each announcement, picked from 22 of
-the cheerful ones in [Twitch Emotes 2.0](https://www.curseforge.com/wow/addons/twitch-emotes-v2).
-It never repeats the emote it used last.
+What goes in front of the item link is one setting with three choices, cycled
+by the button under the prefix box. One or the other, never two at once: only
+one thing can lead a line.
+
+| Mode | What an announce reads as |
+| --- | --- |
+| **Prefix** | `Drop: [Cursed Vision of Sargeras]` |
+| **Pepe** | `PepePogO [Cursed Vision of Sargeras]` |
+| **Random** | `Ooh, a piece of candy! [Cursed Vision of Sargeras]` |
+
+The prefix box stays yours to edit in the other two modes — it is what you go
+back to — but it is dimmed, because nothing is being announced with it.
+
+**Pepe** picks from 22 of the cheerful pepes in
+[Twitch Emotes 2.0](https://www.curseforge.com/wow/addons/twitch-emotes-v2).
 
 ![A pepe on an announcement](Media/screenshots/loot-pepe.png)
 
@@ -335,6 +348,14 @@ What goes out on the wire is the emote's name, so it becomes a picture only for
 readers who run Twitch Emotes themselves. Everyone else sees the word, e.g.
 `PepePogO Drop: [Cursed Vision of Sargeras]`. That addon is not a dependency of
 this one and nothing breaks without it.
+
+**Random** picks a line from a list of fifty — `Another one.`, `Ooh, shiny!`,
+`Mine! Mine! Mine!`, `The boss dropped its wallet:`, `One does not simply pass
+on this:` and so on. Plain text, so unlike a pepe it reads the same for
+everyone whatever they have installed, and a different one each drop.
+
+Both random modes re-roll once when the pick repeats the last one, so the same
+line rarely lands twice in a row.
 
 ### Slash commands
 
@@ -357,7 +378,8 @@ this one and nothing breaks without it.
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
 | `/apla window` | Open or close the loot window (`/apla roll` also works) |
 | `/apla popup [0-60]` | Seconds the drop popup shows for; no number toggles it, 0 turns it off |
-| `/apla pepe` | Toggle pepe mode |
+| `/apla mode <prefix\|pepe\|random>` | What it says a drop with (`/apla say` also works) |
+| `/apla pepe` | Flip between pepe and your prefix |
 | `/apla who` | Show the elected announcer and all peers |
 | `/apla debug` | Log every roll decision |
 | `/apla minimap` | Show or hide the minimap button |
