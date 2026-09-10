@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.9.1] - 2026-09-10
+
+### Fixed
+- The roll summary no longer draws through the **BoE stack** radio buttons.
+  It sat at a fixed offset chosen when the grid had two rows; the third row
+  grew into it. It now hangs off the bottom of the grid, so it follows however
+  many rows there are.
+
+### Changed
+- **Show minimap button** is the first line of the panel and **Roll
+  automatically** with **At login** the second, rather than the other way
+  round.
+- A drop no one has taken leaves the winner column empty rather than saying
+  `nobody`. There is nothing to report yet, and an empty space says that
+  without a word to read past on every unclaimed row.
+
 ## [1.9.0] - 2026-09-10
 
 ### Changed

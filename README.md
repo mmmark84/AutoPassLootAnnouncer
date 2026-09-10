@@ -169,7 +169,7 @@ Off by default. **Loot window** at the bottom of the options panel cycles throug
 │▓[Heart of Darkness] x2░░░░░░░░░░░░░ Pass   1s░│   ← red, nearly out
 ├───────────────────────────────────────────────┤
 │ Bloodfist Helmet ..................... Isaari │
-│ Heart of Darkness x2 ................. nobody │
+│ Heart of Darkness x2                          │
 │ Heart of Darkness x3 ................ Aereora │
 │ Mark of the Illidari x12 ............ Perhorn │
 └──────────────────────────────────────────────◢┘
@@ -242,7 +242,7 @@ That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else t
 
 So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
 
-The roll says how many dropped as well as what did, so a stack is a drop like any other: logged when it drops, reading `nobody`, with the number that dropped on it and a name once somebody loots it. Ten hearts off a night of trash are ten entries rather than one running total — which is what lets the popup say `x2` for the two that just dropped while the loot window adds them up per winner.
+The roll says how many dropped as well as what did, so a stack is a drop like any other: logged when it drops with no name beside it, carrying the number that dropped, and a name once somebody loots it. Ten hearts off a night of trash are ten entries rather than one running total — which is what lets the popup say `x2` for the two that just dropped while the loot window adds them up per winner.
 
 **One consequence worth knowing:** solo, nothing is ever rolled for, so nothing is logged. The log is a record of what the group was offered, not of what you picked up.
 

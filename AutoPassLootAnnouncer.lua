@@ -2034,7 +2034,14 @@ local function BuildPanel()
     body:SetPoint("TOPLEFT", 0, -PRESET_BAR_H)
     body:SetPoint("BOTTOMRIGHT")
 
-    panel.pass = MakeCheck(body, "APLACheckPass", "Roll automatically", 16, -34,
+    panel.minimap = MakeCheck(body, "APLACheckMinimap", "Show minimap button", 16, -34,
+        nil,
+        function(v)
+            db.minimapHide = not v
+            if v then button:Show() else button:Hide() end
+        end)
+
+    panel.pass = MakeCheck(body, "APLACheckPass", "Roll automatically", 16, -60,
         "Master switch for the grid below. With everything set to Pass it just passes on the lot, "
             .. "the same net effect as Blizzard's Pass on Loot checkbox. Never carried between "
             .. "sessions; the button beside this one decides what happens at login.",
@@ -2044,7 +2051,7 @@ local function BuildPanel()
     -- it next to the thing it qualifies and leaves everything below where it is.
     panel.loginArm = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     panel.loginArm:SetSize(120, 20)   -- ends at x=320, inside the frame's inset
-    panel.loginArm:SetPoint("TOPLEFT", 200, -33)
+    panel.loginArm:SetPoint("TOPLEFT", 200, -59)
     panel.loginArm:SetScript("OnClick", function()
         db.loginArm = NextLoginArm(db.loginArm)
         RefreshPanel()
@@ -2057,17 +2064,9 @@ local function BuildPanel()
     })
 
 
-    panel.minimap = MakeCheck(body, "APLACheckMinimap", "Show minimap button", 16, -60,
-        nil,
-        function(v)
-            db.minimapHide = not v
-            if v then button:Show() else button:Hide() end
-        end)
-
-
-
+    -- Placed once the rows below have been laid out, so it cannot land on top
+    -- of them: see the anchor after the grid loop.
     panel.summary = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    panel.summary:SetPoint("TOPLEFT", 24, -208)
     panel.summary:SetWidth(292)
     panel.summary:SetJustifyH("LEFT")
 
@@ -2146,9 +2145,10 @@ local function BuildPanel()
 
     -- One row per kind, built once and pointed at whichever quality the tabs
     -- are showing. Each carries a hover explaining what lands in it.
+    local ROW_TOP, ROW_H = -160, 20
     panel.rows = {}
     for r, kind in ipairs(KINDS) do
-        local y = -160 - (r - 1) * 20
+        local y = ROW_TOP - (r - 1) * ROW_H
         local row = { key = kind.key, buttons = {} }
 
         row.label = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2173,6 +2173,11 @@ local function BuildPanel()
 
         panel.rows[r] = row
     end
+
+    -- Under the last row rather than at a fixed offset: with the grid a row
+    -- taller than it once was, the old constant put the first line of the
+    -- summary behind the BoE stack radio buttons.
+    panel.summary:SetPoint("TOPLEFT", 24, ROW_TOP - #KINDS * ROW_H - 12)
 
     SelectQuality(4)   -- epic is the one people actually come here to set
 
@@ -2588,7 +2593,7 @@ function RefreshRollWindow()
             if not e.winner and e.res then
                 row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
-                row.who:SetText("|cff808080" .. (e.winner or "nobody") .. "|r")
+                row.who:SetText(e.winner and ("|cff808080" .. e.winner .. "|r") or "")
             end
             row:Show()
         else
@@ -3275,7 +3280,7 @@ function pop.refresh()
             if not e.winner and e.res then
                 row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
-                row.who:SetText("|cff808080" .. (e.winner or "nobody") .. "|r")
+                row.who:SetText(e.winner and ("|cff808080" .. e.winner .. "|r") or "")
             end
             row:Show()
         else
