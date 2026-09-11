@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.11.1] - 2026-09-11
+
+### Fixed
+- The session details window **counted a drop differently from the loot
+  window** when the group had changed. Five Hearts of Darkness that all went
+  to the same person were one `x5` row in the loot window and a four and a one
+  here, because this window folded per roster as well as per item and winner,
+  so that no row could claim one group was standing there for drops two of
+  them saw. It was accurate and it read as a fault -- two windows disagreeing
+  about the same five items, for a reason neither of them gave, on a night
+  where you had already answered the group-changed prompt with "keep counting
+  this as one session". Rows fold exactly as they do in the loot window now.
+  The rosters are still kept per drop: where a row's drops fell either side of
+  a change, its tooltip names the group most of them fell under and says the
+  group changed, which is where a detail that fine belongs.
+- A roster the client had only **half filled in** could be recorded as a group
+  of its own. The walk stopped at "found nobody" before deciding not to record
+  anything, so a group of fourteen that answered for four was filed as a group
+  of four -- one nobody was ever in, that the next drop would be logged
+  against and that would then stand in the participant list. It is the whole
+  group or none of it now.
+
 ## [1.11.0] - 2026-09-11
 
 ### Added

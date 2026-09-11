@@ -1304,7 +1304,12 @@ function roster.now()
         for i = 1, GetNumGroupMembers() do
             if Add(prefix .. i) then found = found + 1 end
         end
-        if found == 0 then return nil end
+        -- Every one of them, or none of this. The walk covers the player plus
+        -- the rest either way -- raid1..N counts you among them and party1..N
+        -- does not -- so anything short of one less than the count is the unit
+        -- table still filling in, and recording it would invent a roster that
+        -- nobody was ever in and file the next drop under it.
+        if found < GetNumGroupMembers() - 1 then return nil end
     end
 
     table.sort(names)
@@ -3686,14 +3691,18 @@ function det.session()
     return db.loot, 0
 end
 
--- What the list is made of: one row per item per winner per roster, the same
--- folding the loot window does and for the same reason -- three Hearts of
--- Darkness that all went the same way are an "x3" rather than three lines.
+-- What the list is made of: one row per item per winner, exactly the folding
+-- the loot window does and for the same reason -- three Hearts of Darkness
+-- that all went the same way are an "x3" rather than three lines.
 --
--- Per roster as well, which the loot window has no reason to care about: a
--- fold that spanned somebody joining would have to claim one of the two groups
--- was there for all of it, and the roster on a row is the one thing in this
--- window nothing else can tell you.
+-- Exactly, because the two windows are read side by side. This folded per
+-- roster as well at first, so that a row could never claim one group was
+-- standing there for drops two of them saw. It was right and it read as a
+-- fault: five hearts in the loot window and a four and a one here, for no
+-- reason either window gave, on a night whose group changed once and where
+-- you had already said to keep counting it as one session. The rosters are
+-- still on the row, and where they differ the tooltip says so -- which is
+-- where a detail that fine belongs.
 function det.list()
     local sess = det.session()
     local d    = db.details
@@ -3702,17 +3711,20 @@ function det.list()
     local folded, rows = {}, {}
     for _, e in ipairs(sess.entries) do
         if EntryQuality(e) >= d.min then
-            local key  = e.winner and (e.id .. roster.SEP .. e.winner
-                                       .. roster.SEP .. tostring(e.r))
+            local key  = e.winner and (e.id .. roster.SEP .. e.winner)
             local into = key and folded[key]
             if into then
                 into.count = into.count + (e.count or 1)
                 into.drops = into.drops + 1
+                into.rs[e.r or 0] = (into.rs[e.r or 0] or 0) + 1
                 if (e.t or 0) > into.t then into.t = e.t or 0 end
             else
                 local row = {
                     link = e.link, count = e.count or 1, drops = 1,
-                    winner = e.winner, res = e.res, t = e.t or 0, r = e.r,
+                    winner = e.winner, res = e.res, t = e.t or 0,
+                    -- which rosters the drops behind this row fell under, and
+                    -- how many apiece; 0 stands for the ones with no roster
+                    rs = { [e.r or 0] = 1 },
                     g = EntryQuality(e) * 2 + (EntryStacks(e) and 1 or 0),
                     name = (e.link:match("%[(.-)%]") or e.link):lower(),
                 }
@@ -3720,6 +3732,19 @@ function det.list()
                 if key then folded[key] = row end
             end
         end
+    end
+
+    -- The group a folded row belongs to: the one most of its drops fell under.
+    -- A row folded across a roster change has no single answer, so it says
+    -- which way it leans and admits there was a change rather than picking one
+    -- of the two and keeping quiet.
+    for _, row in ipairs(rows) do
+        local best, most, kinds = 0, -1, 0
+        for idx, n in pairs(row.rs) do
+            kinds = kinds + 1
+            if n > most or (n == most and idx > best) then best, most = idx, n end
+        end
+        row.r, row.mixed = best > 0 and best or nil, kinds > 1
     end
 
     -- Searched after the folding rather than before it, so a total is never
@@ -3734,8 +3759,11 @@ function det.list()
                 or (row.winner and row.winner:lower():find(find, 1, true))
                 or (row.res and row.res:lower():find(find, 1, true))
             if not hit then
-                for _, name in ipairs(roster.of(sess, row) or {}) do
-                    if name:lower():find(find, 1, true) then hit = true; break end
+                for idx in pairs(row.rs) do
+                    for _, name in ipairs(sess.rosters and sess.rosters[idx] or {}) do
+                        if name:lower():find(find, 1, true) then hit = true; break end
+                    end
+                    if hit then break end
                 end
             end
             if hit then keep[#keep + 1] = row end
@@ -4050,6 +4078,10 @@ function det.build()
                 GameTooltip:AddLine(("%d drops, the last at %s"):format(self.drops,
                     date("%H:%M", self.latest or 0)), 0.6, 0.6, 0.6)
             end
+            if self.mixed then
+                GameTooltip:AddLine("The group changed while these dropped; above is "
+                    .. "the one most of them fell under.", 0.6, 0.6, 0.6, true)
+            end
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -4232,7 +4264,7 @@ function det.refresh()
     for i, row in ipairs(det.rows) do
         local e = (i <= shown) and list[offset + i] or nil
         row.group, row.link, row.res, row.entry, row.drops = nil, nil, nil, nil, nil
-        row.latest = nil
+        row.latest, row.mixed = nil, nil
         if e and e.header then
             row.group = e.header
             row.band:Show()
@@ -4245,7 +4277,7 @@ function det.refresh()
             row:Show()
         elseif e then
             row.link, row.res, row.entry = e.link, e.res, e
-            row.drops, row.latest = e.drops, e.t
+            row.drops, row.latest, row.mixed = e.drops, e.t, e.mixed
             row.band:Hide()
             row.icon:Show()
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)

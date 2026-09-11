@@ -278,7 +278,7 @@ Everything the loot window's rows have no room for:
 | Participants | Everyone the session saw, the ones who were there for most of it first, with what they won beside them. Hover for how many of the session's drops they were present for |
 | A row | Hover for the item, its reserves, and **who was in the group when it dropped**. Shift-click links it to chat, as in the loot window |
 
-Drops fold the way they do in the loot window — one row per item per winner — and per roster as well, so a fold never spans somebody joining. It is the whole session either way: the footer counts what the threshold lets through, and says when the session ran and what it paid.
+Drops fold exactly the way they do in the loot window — one row per item per winner — so the two windows never disagree about how many of something dropped. Where a row's drops fell either side of a group change, the tooltip names the group most of them fell under and says the group changed; splitting the row instead read as a fault, which is what it looked like beside a loot window counting the same five hearts as five. It is the whole session either way: the footer counts what the threshold lets through, and says when the session ran and what it paid.
 
 Position, size, threshold, sort order and which groups you folded away are remembered between logins. What you typed in the search box is not: coming back tomorrow to a window showing four of the night's rows would read as a window that had lost the rest.
 
@@ -286,7 +286,7 @@ Position, size, threshold, sort order and which groups you folded away are remem
 
 Every drop records the group it fell in front of. Not a copy of the roster per row — that would be the same ten names written out a few hundred times a night — but an index into the rosters the session has seen, so people coming and going costs a handful of name lists and each row costs one integer.
 
-It is read at the moment the drop is logged, because who was there when it fell is the only instant the answer matters. If the client has not filled its roster in yet — which happens for a second after a group changes — the row keeps no roster at all rather than a wrong one: a drop filed as having happened to you alone is worse than a drop with no group on it, because only one of the two is obviously missing. Rows logged before this release have none, and read as such.
+It is read at the moment the drop is logged, because who was there when it fell is the only instant the answer matters. It has to be the whole group or none of it: if the client has not finished filling its roster in — which happens for a moment after a group changes — the row keeps no roster at all rather than a short one, because a half-filled roster is a group nobody was ever in and the next drop would be filed under it. A drop recorded as having happened to you alone is worse than a drop with no group on it, since only one of the two is obviously missing. Rows logged before this release have none, and read as such.
 
 Names the log only ever saw as a winner are in the participant list too, and say so on their tooltip. Under master loot an item can be handed to somebody the roster walk never saw, and a participant list the winner column contradicts is worse than one with a stranger in it.
 
