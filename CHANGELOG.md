@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.11.0] - 2026-09-11
+
+### Added
+- **Who was in the group** is recorded against every drop. Not a copy of the
+  roster on each row -- that would be the same ten names written out a few
+  hundred times a night -- but an index into the rosters the session has seen,
+  so an evening of people coming and going costs a handful of name lists and
+  each row costs one integer. It is read at the moment the drop is logged,
+  because who was standing there when it fell is the only instant the answer
+  matters. If the client has not filled its roster in yet, which happens for a
+  second after a group changes, the row keeps no roster rather than a wrong
+  one: a drop filed as having happened to you alone is worse than a drop with
+  no group on it, because only one of the two is obviously missing.
+- A **session details** window, on `/apla details` and on **Details of this
+  session...** on the loot window's right-click menu. The whole of a session
+  at once, which the loot window has no room to be: searchable by item,
+  winner, reserve or participant; sortable by item, quantity, winner or time;
+  grouped by quality with each group foldable away; its own quality threshold,
+  so asking a question of a session does not change what the loot window has
+  been showing all night. Beside the list, **the session's participants**, the
+  ones who were there for most of it first, with what they won. Every row's
+  tooltip names the group that was standing there when that item dropped.
+  Position, size, threshold, sort order and folded groups are remembered; what
+  you typed in the search box is not.
+- The loot window **offers a new session when the group changes**, as a line
+  in the window rather than as a dialog: `Grendl left -- new session?`, with
+  the button that does it and an x that leaves it alone. Somebody joining or
+  leaving is usually what the end of a session looks like, and the only way to
+  act on that was to remember to. It waits about five seconds for the roster
+  to settle, because a raid re-forming or one disconnect arrives as a burst of
+  roster changes; it stays quiet when the session is empty, and while a filed
+  session is on show. Doing nothing is an answer and the safe one -- nothing
+  is ever filed on your behalf. **Ask when the group changes** on the
+  right-click menu turns it off.
+
+### Changed
+- The loot window's list no longer prints **a caption above each group**. It
+  is sorted exactly as before -- epics, then rares, then uncommons, stackables
+  ahead of the rest -- but silently: the colour of the link already says which
+  quality a run of rows is, and every caption was a line of a small window not
+  spent on loot, the more so the more kinds of thing a pull dropped. The
+  captions are in the session details window instead, which has the room for
+  them and can fold a group away by them.
+- The loot window's ten geometry constants are one table. The main chunk had
+  used all two hundred locals Lua allows a file, so nothing new could be
+  declared until something gave them back -- the same reason the drop popup
+  has been one `pop` table all along.
+
 ## [1.10.0] - 2026-09-11
 
 ### Changed

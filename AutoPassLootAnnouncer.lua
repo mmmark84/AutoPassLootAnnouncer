@@ -37,6 +37,10 @@ local defaults = {
     grace        = 0,      -- seconds to wait before answering a roll, 0 = straight away
     popup        = 0,      -- seconds the drop popup shows for, 0 = no popup
     trackMin     = 2,      -- the lowest quality worth showing; see MIN_TRACK
+    askNewSession = true,  -- the loot window offering a new session when the
+                           -- group changes; see the prompt down in that window
+    -- details = { min = ..., sort = ..., collapsed = {} }, built in ADDON_LOADED
+    -- for the same reason the action tables are
     -- loot = { entries = {}, money = 0, started = <time> }, built in ADDON_LOADED
     -- for the same reason the action tables are
     debug        = false,  -- /apla debug: log every roll decision
@@ -767,6 +771,25 @@ local pop = {
     queued   = false,
 }
 
+-- The session details window, one name for the same reason, and filled in down
+-- in its own section a long way below this one.
+local det = {
+    view     = 0,     -- the session it is reading: 0 the live one, 1+ into lootPast
+    search   = "",    -- runtime only. A filter you typed is not a setting, and
+                      -- coming back tomorrow to a window showing four of the
+                      -- night's rows would read as a window that had lost them
+    HEADER   = 26,
+    ROW_H    = 18,
+    TOP      = 104,   -- title, the two rows of controls, the column heads
+    FOOT     = 24,
+    SIDE     = 168,   -- the participants column
+    MIN_W = 560, MIN_H = 320,
+    MAX_W = 1100, MAX_H = 820,
+    rows     = {},
+    people   = {},
+}
+det.FRAMES = math.ceil((det.MAX_H - det.TOP - det.FOOT) / det.ROW_H)
+
 function pop.on() return (tonumber(db.popup) or 0) > 0 end
 
 function pop.label(secs)
@@ -1236,7 +1259,90 @@ end
 -- dropped once, which is exactly the wrong thing to tell a raid.
 local function LootChanged(entry, filled)
     RefreshRollWindow()
+    det.refresh()   -- a no-op unless it is open on the session that changed
     if filled then pop.update(entry) else pop.wake(entry) end
+end
+
+-- Who was standing there when it dropped.
+--
+-- A copy of the roster on every row would be the same ten names written out
+-- again a few hundred times a night, so the session keeps the rosters it has
+-- seen and a row points at one of them with an index. People come and go a
+-- handful of times in an evening and drops run into the hundreds; an integer a
+-- row is what that difference is worth.
+--
+-- Read at the moment the drop is logged rather than kept current by
+-- GROUP_ROSTER_UPDATE. The question is who was there when it fell, so the only
+-- instant the answer matters is that one, and walking ten units a drop costs
+-- nothing beside doing it on every roster event all night.
+-- One table rather than half a dozen locals: the main chunk is close enough to
+-- Lua's two hundred of them that a subsystem has to arrive as one, which is
+-- how the drop popup below is put together too.
+local roster = { SEP = "\031" }   -- SEP: nothing a character name can contain
+
+-- The group as it stands, names sorted, or nil while the client is still
+-- filling the unit table in -- the same trap PruneToGroup fell into, and the
+-- same answer: better no roster than a wrong one. A drop filed as having
+-- happened to you alone is worse than a drop with no roster at all, because
+-- only one of the two is obviously missing.
+function roster.now()
+    local names, classes, seen = {}, {}, {}
+
+    local function Add(unit)
+        local n = UnitName(unit)
+        if not n or seen[n] then return false end
+        seen[n] = true
+        names[#names + 1] = n
+        classes[n] = select(2, UnitClass(unit))
+        return true
+    end
+
+    Add("player")
+
+    if IsInGroup() then
+        local prefix, found = IsInRaid() and "raid" or "party", 0
+        for i = 1, GetNumGroupMembers() do
+            if Add(prefix .. i) then found = found + 1 end
+        end
+        if found == 0 then return nil end
+    end
+
+    table.sort(names)
+    return names, classes
+end
+
+function roster.sig(names) return table.concat(names, roster.SEP) end
+
+-- Which of the session's rosters the group matches, adding it if it is one the
+-- session has not seen. The signature map is rebuilt whenever the session
+-- table changes underneath it -- a new session, a cleared log, a fresh login --
+-- so nothing anywhere else has to remember to reset it.
+function roster.log()
+    local names, classes = roster.now()
+    if not names then return nil end
+
+    local sess = db.loot
+    sess.rosters = sess.rosters or {}
+    sess.classes = sess.classes or {}
+    -- Kept per session rather than per roster: a name's class is the same in
+    -- every roster it turns up in, and this way the window can colour a winner
+    -- the roster walk never saw.
+    for name, class in pairs(classes) do
+        if class then sess.classes[name] = class end
+    end
+
+    if roster.mapFor ~= sess then
+        roster.mapFor, roster.map = sess, {}
+        for i, r in ipairs(sess.rosters) do roster.map[roster.sig(r)] = i end
+    end
+
+    local sig = roster.sig(names)
+    local at  = roster.map[sig]
+    if not at then
+        at = #sess.rosters + 1
+        sess.rosters[at], roster.map[sig] = names, at
+    end
+    return at
 end
 
 -- winner nil means "this dropped, nobody has won it yet". `offered` is
@@ -1306,10 +1412,10 @@ function LogDrop(link, count, winner, offered)
             return
         end
         entries[#entries + 1] = { id = id, link = link, count = n, winner = winner,
-                                  q = quality, s = stacks, t = time() }
+                                  q = quality, s = stacks, t = time(), r = roster.log() }
     else
         entries[#entries + 1] = { id = id, link = link, count = n,
-                                  q = quality, s = stacks, t = time() }
+                                  q = quality, s = stacks, t = time(), r = roster.log() }
     end
 
     db.loot.started = db.loot.started or time()
@@ -1410,7 +1516,7 @@ function LogAnnounced(link, reserves)
     end
 
     local e = { id = id, link = link, count = 1, q = QualityOf(link), s = IsStackable(link),
-                t = time(), announced = true, res = reserves }
+                t = time(), announced = true, res = reserves, r = roster.log() }
     entries[#entries + 1] = e
     lastAnnounced, lastAnnouncedAt = e, time()
 
@@ -1446,6 +1552,9 @@ local function NewLootSession()
     -- The row a "Reserved by" line would have landed on belongs to the session
     -- just filed, and a reserve arriving now is not about it.
     lootView, lastAnnounced = 0, nil
+    -- and the prompt that may have started this is answered, whoever answered
+    -- it; the group standing here now is what the new session changes from
+    roster.ask, roster.seen = nil, nil
     LootChanged()
     print(("|cff66ccffAPLA|r new session started; %s filed, %d kept")
         :format(SessionLabel(db.lootPast[1]), #db.lootPast))
@@ -1455,6 +1564,7 @@ function ClearLog()
     db.loot = { entries = {}, money = 0, started = time() }
     db.lootPast = {}
     lootView, lastAnnounced = 0, nil
+    roster.ask, roster.seen = nil, nil
     LootChanged()
     print("|cff66ccffAPLA|r drop log cleared, every session with it")
 end
@@ -1482,6 +1592,69 @@ local function ConfirmClearLog()
         return
     end
     StaticPopup_Show("AUTOPASSLOOTANNOUNCER_CLEAR_LOG")
+end
+
+-- Somebody joining or leaving is what the end of a session usually looks like:
+-- the pull is over, half the group has gone, and the next hour of drops wants
+-- counting apart from the last one. The addon cannot know that, so it asks --
+-- once, in the loot window, as a line you can ignore -- rather than filing a
+-- session on your behalf. Filing is cheap to do late and impossible to undo.
+--
+-- It waits for the roster to settle first. A raid re-forming, a group walking
+-- through an instance portal or one person's disconnect all arrive as a burst
+-- of GROUP_ROSTER_UPDATE, and asking on the first of them would be asking
+-- about a group that no longer exists a second later.
+roster.SETTLE = 5
+
+function roster.changed()
+    roster.token = (roster.token or 0) + 1
+    local mine = roster.token
+    C_Timer.After(roster.SETTLE, function()
+        if mine ~= roster.token then return end   -- another change since; that one asks
+        roster.settle()
+    end)
+end
+
+function roster.settle()
+    local names = roster.now()
+    if not names then return end   -- the unit table is still filling in
+    local sig = roster.sig(names)
+
+    -- Where we came in. The first roster of a session is not a change from
+    -- anything, and a login is not either.
+    if not roster.seen then
+        roster.seen, roster.seenNames = sig, names
+        return
+    end
+    if sig == roster.seen then return end
+
+    local was = roster.seenNames or {}
+    roster.seen, roster.seenNames = sig, names
+
+    -- Nothing to file, nothing to ask. An empty session is already a new one,
+    -- which is what NewLootSession would tell you.
+    if #db.loot.entries == 0 and (db.loot.money or 0) == 0 then return end
+
+    -- Who it was, when it was one person. A name is the difference between a
+    -- prompt you can answer at a glance and one you have to think about; more
+    -- than one and the names would be longer than the window.
+    local here = {}
+    for _, n in ipairs(names) do here[n] = true end
+    local gone, came = {}, {}
+    for _, n in ipairs(was) do if not here[n] then gone[#gone + 1] = n end end
+    local before = {}
+    for _, n in ipairs(was) do before[n] = true end
+    for _, n in ipairs(names) do if not before[n] then came[#came + 1] = n end end
+
+    local why
+    if #gone == 1 and #came == 0 then why = gone[1] .. " left"
+    elseif #came == 1 and #gone == 0 then why = came[1] .. " joined"
+    elseif #gone > 0 and #came == 0 then why = ("%d left"):format(#gone)
+    elseif #came > 0 and #gone == 0 then why = ("%d joined"):format(#came)
+    else why = "the group changed" end
+
+    roster.ask, roster.why = true, why
+    RefreshRollWindow()
 end
 
 ----------------------------------------------------------------
@@ -2494,6 +2667,73 @@ local function ShortReserve(res)
     return ("%s +%d"):format((first:gsub("%s+$", "")), more)
 end
 
+-- The group a row dropped under, or nil for a row from before the log kept
+-- them -- which is every row in a file written before this version.
+function roster.of(sess, e)
+    return e.r and sess.rosters and sess.rosters[e.r] or nil
+end
+
+-- A name in its class colour, for the two places names are listed.
+function roster.colour(sess, name)
+    local class = sess.classes and sess.classes[name]
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    if not c then return "|cffcccccc" .. name .. "|r" end
+    -- colorStr where the client offers it, and the channels rounded to whole
+    -- numbers where it does not: a class colour is a fraction of 255 and
+    -- string.format wants an integer for %x.
+    if c.colorStr then return "|c" .. c.colorStr .. name .. "|r" end
+    return ("|cff%02x%02x%02x%s|r"):format(
+        math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5),
+        math.floor(c.b * 255 + 0.5), name)
+end
+
+-- Everyone the session saw, with how much of it they were there for. `present`
+-- counts the drops they were in the group for and `won` the items that went to
+-- them, both over rows at or above `min`, so the figures agree with the list
+-- they sit beside.
+--
+-- Names the log knows only as a winner are in here too. Under master loot an
+-- item can be handed to somebody the roster walk never saw -- an alt, a name
+-- the client had not filled in when it fell -- and a participant list the
+-- winner column contradicts is worse than one with a stranger in it.
+function roster.people(sess, min)
+    local by, out = {}, {}
+
+    local function Person(name)
+        local p = by[name]
+        if not p then
+            p = { name = name, present = 0, won = 0 }
+            by[name], out[#out + 1] = p, p
+        end
+        return p
+    end
+
+    local drops = 0
+    for _, e in ipairs(sess.entries) do
+        if EntryQuality(e) >= min then
+            drops = drops + 1
+            for _, name in ipairs(roster.of(sess, e) or {}) do
+                local p = Person(name)
+                p.present = p.present + 1
+            end
+            if e.winner then
+                local p = Person(e.winner)
+                p.won = p.won + (e.count or 1)
+            end
+        end
+    end
+
+    -- The people who were there for the night at the top and the ones who
+    -- looked in for a pull at the bottom, which is the order a split is read
+    -- in. Alphabetical inside that, so a name is findable.
+    table.sort(out, function(a, b)
+        if a.present ~= b.present then return a.present > b.present end
+        if a.won ~= b.won then return a.won > b.won end
+        return a.name < b.name
+    end)
+    return out, drops
+end
+
 -- Redrawing after a preset has been switched, renamed or imported. A preset
 -- reaches into all three windows and into the announcer election, so rather
 -- than have every caller remember which, they all go through here.
@@ -2517,20 +2757,25 @@ end
 -- It sits on screen for as long as the setting is on, rather than appearing and
 -- vanishing: a window that comes and goes is one nobody can find, aim at, or
 -- resize. Off is the way to get rid of it, and the X in its header is off.
-local ROLL_HEADER     = 22
-local ROLL_ROW_H      = 18   -- a pending roll
-local ROLL_RECENT_H   = 16   -- a line of what already happened
-local ROLL_FOOTER     = 8
-local MAX_ROLL_ROWS   = 8    -- a raid boss drops five or six at once at most
-local ROLL_MIN_W, ROLL_MIN_H = 260, 120
-local ROLL_MAX_W, ROLL_MAX_H = 600, 700
+-- One table rather than ten locals. The main chunk is allowed two hundred of
+-- them and had used every one, so a window's worth of constants arrives as a
+-- single name now -- which is the same reason the popup below is one `pop`.
+local ROLL = {
+    HEADER   = 22,
+    ROW_H    = 18,   -- a pending roll
+    RECENT_H = 16,   -- a line of what already happened
+    FOOTER   = 8,
+    MAX_ROWS = 8,    -- a raid boss drops five or six at once at most
+    MIN_W = 260, MIN_H = 120,
+    MAX_W = 600, MAX_H = 700,
+    ASK_H = 20,      -- the "group changed" prompt, when it is up
+}
 -- Row frames for the list of what dropped: as many as fit the window at its
 -- tallest with nothing pending above them. That is how many are on screen at
 -- once, and says nothing about how many there are -- the list has no cap, and
 -- the scroll bar goes the rest of the way. It used to stop at thirty rows,
 -- which three hours of trash went past without anybody being told.
-local ROLL_RECENT_FRAMES =
-    math.ceil((ROLL_MAX_H - ROLL_HEADER - 4 - ROLL_FOOTER) / ROLL_RECENT_H)
+ROLL.FRAMES = math.ceil((ROLL.MAX_H - ROLL.HEADER - 4 - ROLL.FOOTER) / ROLL.RECENT_H)
 
 local rollWin
 local pendingRolls = {}   -- [rollID] = { action, link, itemID, grace, deadline }
@@ -2600,14 +2845,13 @@ end
 -- together, biggest pile first, so "who has the hearts" is one glance rather
 -- than a search. Newest-first is the popup's job, and the rolls pending above
 -- this list are still the thing that just happened.
+--
+-- Silently, with no caption where one group gives way to the next: the colour
+-- of the links already says which quality a run of rows is, and a line spent
+-- saying it again is a line of a small window not spent on loot.
 local function RecentEntries()
     local function Group(e)   -- higher sorts first
         return EntryQuality(e) * 2 + (EntryStacks(e) and 1 or 0)
-    end
-
-    local function Caption(g)
-        return QualityLabel(math.floor(g / 2))
-            .. (g % 2 == 1 and " |cff808080stackable|r" or " |cff808080not stackable|r")
     end
 
     local function Before(a, b)
@@ -2667,19 +2911,7 @@ local function RecentEntries()
         end
     end
     table.sort(rows, Before)
-
-    -- A caption where one group gives way to the next, so the split reads
-    -- without knowing the rule. It is a row of the list like any other, which
-    -- is what lets it scroll with the rest.
-    local out, group = {}, nil
-    for _, row in ipairs(rows) do
-        if row.g ~= group then
-            group = row.g
-            out[#out + 1] = { header = Caption(group) }
-        end
-        out[#out + 1] = row
-    end
-    return out
+    return rows
 end
 
 -- Soonest deadline first, so rows leave from the top and the ones below do not
@@ -2702,11 +2934,22 @@ function RefreshRollWindow()
     local recent = RecentEntries()
     local now    = GetTime()
 
+    -- The prompt, and only over the session it would file: looking back at a
+    -- filed one is not the moment to be asked to file this one.
+    if roster.ask and db.askNewSession and lootView == 0 then
+        rollWin.ask.text:SetText(("|cffffd100%s|r -- new session?"):format(roster.why
+            or "The group changed"))
+        rollWin.ask:Show()
+    else
+        rollWin.ask:Hide()
+    end
+
     -- However many are pending, only as many as there is window for. The ones
     -- that do not fit are still answered on time: the countdown is C_Timer's
     -- and the rows are only the picture of it.
-    local room  = rollWin:GetHeight() - ROLL_HEADER - ROLL_FOOTER
-    local npend = math.min(#rolls, MAX_ROLL_ROWS, math.max(0, math.floor(room / ROLL_ROW_H)))
+    local room  = rollWin:GetHeight() - ROLL.HEADER - ROLL.FOOTER
+        - (rollWin.ask:IsShown() and (ROLL.ASK_H + 2) or 0)
+    local npend = math.min(#rolls, ROLL.MAX_ROWS, math.max(0, math.floor(room / ROLL.ROW_H)))
 
     local shown = LayoutRollWindow(npend)
 
@@ -2745,23 +2988,14 @@ function RefreshRollWindow()
         end
     end
 
-    FauxScrollFrame_Update(rollWin.scroll, #recent, shown, ROLL_RECENT_H)
+    FauxScrollFrame_Update(rollWin.scroll, #recent, shown, ROLL.RECENT_H)
     local offset = FauxScrollFrame_GetOffset(rollWin.scroll)
 
     for i, row in ipairs(rollWin.recent) do
         local e = (i <= shown) and recent[offset + i] or nil
-        if e and e.header then
-            -- a group caption: no item, so nothing to hover, link or click
-            row.link, row.res = nil, nil
-            row.icon:Hide()
-            row.band:Show()
-            row.text:SetText(e.header)
-            row.who:SetText("")
-            row:Show()
-        elseif e then
+        if e then
             row.link, row.res = e.link, e.res
             row.icon:Show()
-            row.band:Hide()
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
@@ -2966,11 +3200,33 @@ local function RollMenuInit(_, level)
         disabled = #db.lootPast == 0,
     })
     Add({
+        -- Everything the rows in this window cannot hold: the whole session at
+        -- once, searchable, and who was in the group for each of it.
+        text = "Details of this session...",
+        notCheckable = true,
+        func = function()
+            CloseDropDownMenus()
+            det.toggle(view)
+        end,
+    })
+    Add({
         text = "Start a new session",
         notCheckable = true,
         func = function()
             CloseDropDownMenus()
             NewLootSession()
+        end,
+    })
+    Add({
+        -- The prompt is a line in this window offering what the row above
+        -- does, so its switch belongs next to that row.
+        text = "Ask when the group changes",
+        checked = db.askNewSession,
+        func = function()
+            db.askNewSession = not db.askNewSession
+            if not db.askNewSession then roster.ask = nil end
+            CloseDropDownMenus()
+            RefreshRollWindow()
         end,
     })
     Add({
@@ -3037,10 +3293,10 @@ local function BuildRollWindow()
     -- SetResizeBounds is the modern name for the pair below it, guarded the way
     -- SetObeyStepOnDrag and SetColorTexture are
     if rollWin.SetResizeBounds then
-        rollWin:SetResizeBounds(ROLL_MIN_W, ROLL_MIN_H, ROLL_MAX_W, ROLL_MAX_H)
+        rollWin:SetResizeBounds(ROLL.MIN_W, ROLL.MIN_H, ROLL.MAX_W, ROLL.MAX_H)
     else
-        rollWin:SetMinResize(ROLL_MIN_W, ROLL_MIN_H)
-        rollWin:SetMaxResize(ROLL_MAX_W, ROLL_MAX_H)
+        rollWin:SetMinResize(ROLL.MIN_W, ROLL.MIN_H)
+        rollWin:SetMaxResize(ROLL.MAX_W, ROLL.MAX_H)
     end
     rollWin:EnableMouse(true)
     rollWin:SetClampedToScreen(true)
@@ -3112,7 +3368,7 @@ local function BuildRollWindow()
     local head = CreateFrame("Frame", nil, rollWin)
     head:SetPoint("TOPLEFT", 1, -1)
     head:SetPoint("TOPRIGHT", -1, -1)
-    head:SetHeight(ROLL_HEADER)
+    head:SetHeight(ROLL.HEADER)
     head:EnableMouse(true)
     head:RegisterForDrag("LeftButton")
     head:SetScript("OnDragStart", function() rollWin:StartMoving() end)
@@ -3151,20 +3407,79 @@ local function BuildRollWindow()
     rollWin.money:SetPoint("RIGHT", close, "LEFT", -2, 0)
     rollWin.money:SetJustifyH("RIGHT")
 
+    -- The "group changed" prompt. A line of this window rather than a dialog:
+    -- it arrives mid-raid, and a box in the middle of the screen asking about
+    -- bookkeeping that can wait until the pull is over is a box you learn to
+    -- dismiss without reading. Two answers, and the second is doing nothing --
+    -- the line goes by itself the next time the group changes.
+    local ask = CreateFrame("Frame", nil, rollWin)
+    ask:SetHeight(ROLL.ASK_H)
+    ask:EnableMouse(true)   -- so a miss between the buttons does not drag the window
+
+    local askBg = ask:CreateTexture(nil, "BACKGROUND")
+    askBg:SetAllPoints()
+    Fill(askBg, 0.85, 0.65, 0.15, 0.16)   -- the same amber the countdown warms to
+
+    local function AskButton(text, w, tip)
+        local b = CreateFrame("Button", nil, ask)
+        b:SetSize(w, ROLL.ASK_H - 6)
+        local bg = b:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        Fill(bg, 1, 1, 1, 0.12)
+        local hl = b:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        Fill(hl, 1, 1, 1, 0.15)
+        local label = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("CENTER")
+        label:SetText(text)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:AddLine(tip, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return b
+    end
+
+    local askNo = AskButton("x", 16,
+        "Keep counting this as one session. The question comes back the next "
+            .. "time the group changes.")
+    askNo:SetPoint("RIGHT", -3, 0)
+    askNo:SetScript("OnClick", function()
+        roster.ask = nil
+        RefreshRollWindow()
+    end)
+
+    local askYes = AskButton("New session", 76,
+        "File what is logged so far and start counting again. Nothing is lost: "
+            .. "the session is kept and this window can still read it.")
+    askYes:SetPoint("RIGHT", askNo, "LEFT", -3, 0)
+    askYes:SetScript("OnClick", function()
+        roster.ask = nil
+        NewLootSession()
+    end)
+
+    ask.text = ask:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ask.text:SetPoint("LEFT", 5, 0)
+    ask.text:SetPoint("RIGHT", askYes, "LEFT", -4, 0)
+    ask.text:SetJustifyH("LEFT")
+    ask:Hide()
+    rollWin.ask = ask
+
     rollWin.rule = rollWin:CreateTexture(nil, "ARTWORK")
     rollWin.rule:SetHeight(1)
     Fill(rollWin.rule, 1, 1, 1, 0.14)
     rollWin.rule:Hide()
 
     rollWin.hint = rollWin:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    rollWin.hint:SetPoint("TOPLEFT", 8, -(ROLL_HEADER + 8))
-    rollWin.hint:SetPoint("TOPRIGHT", -8, -(ROLL_HEADER + 8))
+    rollWin.hint:SetPoint("TOPLEFT", 8, -(ROLL.HEADER + 8))
+    rollWin.hint:SetPoint("TOPRIGHT", -8, -(ROLL.HEADER + 8))
     rollWin.hint:SetJustifyH("LEFT")
     rollWin.hint:Hide()
 
     rollWin.rows = {}
-    for i = 1, MAX_ROLL_ROWS do
-        local row = MakeRollRow(rollWin, ROLL_ROW_H)
+    for i = 1, ROLL.MAX_ROWS do
+        local row = MakeRollRow(rollWin, ROLL.ROW_H)
 
         -- What the addon is about to do, so a row can be read without knowing
         -- the grid off by heart.
@@ -3220,20 +3535,13 @@ local function BuildRollWindow()
     local scroll = CreateFrame("ScrollFrame", "APLARollScroll", rollWin,
         "FauxScrollFrameTemplate")
     scroll:SetScript("OnVerticalScroll", function(self, offset)
-        FauxScrollFrame_OnVerticalScroll(self, offset, ROLL_RECENT_H, RefreshRollWindow)
+        FauxScrollFrame_OnVerticalScroll(self, offset, ROLL.RECENT_H, RefreshRollWindow)
     end)
     rollWin.scroll = scroll
 
     rollWin.recent = {}
-    for i = 1, ROLL_RECENT_FRAMES do
-        local row = MakeRollRow(rollWin, ROLL_RECENT_H)
-
-        -- Faint, and only under a group caption, so the captions read as the
-        -- seams of the list rather than as rows of it.
-        row.band = row:CreateTexture(nil, "BACKGROUND")
-        row.band:SetAllPoints()
-        Fill(row.band, 1, 1, 1, 0.06)
-        row.band:Hide()
+    for i = 1, ROLL.FRAMES do
+        local row = MakeRollRow(rollWin, ROLL.RECENT_H)
 
         row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.who:SetPoint("RIGHT", -2, 0)
@@ -3303,39 +3611,706 @@ function LayoutRollWindow(npend)
     if not rollWin then return 0 end
     local w, h = rollWin:GetWidth(), rollWin:GetHeight()
 
-    local y = ROLL_HEADER + 4
+    local y = ROLL.HEADER + 4
+
+    if rollWin.ask:IsShown() then
+        rollWin.ask:ClearAllPoints()
+        rollWin.ask:SetPoint("TOPLEFT", 6, -y)
+        rollWin.ask:SetPoint("TOPRIGHT", -6, -y)
+        y = y + ROLL.ASK_H + 2
+    end
+    local top = y   -- where the list starts, prompt or no prompt
+
     for i, row in ipairs(rollWin.rows) do
-        row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL_ROW_H))
-        row:SetPoint("TOPRIGHT", -6, -(y + (i - 1) * ROLL_ROW_H))
+        row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL.ROW_H))
+        row:SetPoint("TOPRIGHT", -6, -(y + (i - 1) * ROLL.ROW_H))
         row.text:SetWidth(math.max(40, w - 110))   -- icon, action, seconds
     end
 
-    y = y + npend * ROLL_ROW_H
+    y = top + npend * ROLL.ROW_H
     if npend > 0 then
         rollWin.rule:SetPoint("TOPLEFT", 6, -(y + 3))
         rollWin.rule:SetPoint("TOPRIGHT", -6, -(y + 3))
         y = y + 7
     end
 
-    local shown = math.floor((h - y - ROLL_FOOTER) / ROLL_RECENT_H)
+    local shown = math.floor((h - y - ROLL.FOOTER) / ROLL.RECENT_H)
     if shown < 0 then shown = 0 end
-    if shown > ROLL_RECENT_FRAMES then shown = ROLL_RECENT_FRAMES end
+    if shown > ROLL.FRAMES then shown = ROLL.FRAMES end
 
     rollWin.scroll:ClearAllPoints()
     rollWin.scroll:SetPoint("TOPLEFT", 4, -y)
-    rollWin.scroll:SetSize(math.max(1, w - 34), math.max(1, shown * ROLL_RECENT_H))
+    rollWin.scroll:SetSize(math.max(1, w - 34), math.max(1, shown * ROLL.RECENT_H))
 
     for i, row in ipairs(rollWin.recent) do
-        row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL_RECENT_H))
-        row:SetPoint("TOPRIGHT", -24, -(y + (i - 1) * ROLL_RECENT_H))   -- clear of the bar
+        row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL.RECENT_H))
+        row:SetPoint("TOPRIGHT", -24, -(y + (i - 1) * ROLL.RECENT_H))   -- clear of the bar
         row.text:SetWidth(math.max(40, w - 140))
     end
 
+    -- Under the prompt when there is one, rather than behind it
     rollWin.hint:ClearAllPoints()
-    rollWin.hint:SetPoint("TOPLEFT", 8, -(ROLL_HEADER + 8))
-    rollWin.hint:SetPoint("TOPRIGHT", -8, -(ROLL_HEADER + 8))
+    rollWin.hint:SetPoint("TOPLEFT", 8, -(top + 4))
+    rollWin.hint:SetPoint("TOPRIGHT", -8, -(top + 4))
 
     return shown
+end
+
+----------------------------------------------------------------
+-- Session details
+----------------------------------------------------------------
+-- The third window, and the reading of the drop log the other two cannot give.
+--
+-- There was a session log here once -- tabs, a slider, a Clear button -- and it
+-- went because it was a second place to read the same list. This is not that.
+-- The loot window is a fixture you glance at mid-pull, sized to sit over a
+-- fight, and every line of it is a compromise for that: a handful of rows, one
+-- name apiece, no room to ask a question of what it holds. This opens when the
+-- pull is over and the questions are different ones -- where did the night's
+-- epics go, who was here for them, did that belt ever get handed out -- and it
+-- has the room to answer them.
+--
+-- Who was in the group is the part only this window has. Every row carries the
+-- roster it dropped under, so the names beside the list are the session's own
+-- people rather than whoever happens to be standing next to you now.
+
+-- Which session is on show. Its own, not the loot window's: you open this to
+-- read a session that is over while the window behind it goes on counting the
+-- one that is running.
+function det.session()
+    if det.view > 0 then
+        local s = db.lootPast and db.lootPast[det.view]
+        if s then return s, det.view end
+        det.view = 0   -- cleared, or trimmed off the end, under us
+    end
+    return db.loot, 0
+end
+
+-- What the list is made of: one row per item per winner per roster, the same
+-- folding the loot window does and for the same reason -- three Hearts of
+-- Darkness that all went the same way are an "x3" rather than three lines.
+--
+-- Per roster as well, which the loot window has no reason to care about: a
+-- fold that spanned somebody joining would have to claim one of the two groups
+-- was there for all of it, and the roster on a row is the one thing in this
+-- window nothing else can tell you.
+function det.list()
+    local sess = det.session()
+    local d    = db.details
+    local find = det.search ~= "" and det.search or nil
+
+    local folded, rows = {}, {}
+    for _, e in ipairs(sess.entries) do
+        if EntryQuality(e) >= d.min then
+            local key  = e.winner and (e.id .. roster.SEP .. e.winner
+                                       .. roster.SEP .. tostring(e.r))
+            local into = key and folded[key]
+            if into then
+                into.count = into.count + (e.count or 1)
+                into.drops = into.drops + 1
+                if (e.t or 0) > into.t then into.t = e.t or 0 end
+            else
+                local row = {
+                    link = e.link, count = e.count or 1, drops = 1,
+                    winner = e.winner, res = e.res, t = e.t or 0, r = e.r,
+                    g = EntryQuality(e) * 2 + (EntryStacks(e) and 1 or 0),
+                    name = (e.link:match("%[(.-)%]") or e.link):lower(),
+                }
+                rows[#rows + 1] = row
+                if key then folded[key] = row end
+            end
+        end
+    end
+
+    -- Searched after the folding rather than before it, so a total is never
+    -- split by what you typed. Item, winner and reserve all answer, because
+    -- all three are things you come here to look up -- and the roster too, so
+    -- a name finds the drops somebody was standing there for as well as the
+    -- ones they won.
+    if find then
+        local keep = {}
+        for _, row in ipairs(rows) do
+            local hit = row.name:find(find, 1, true)
+                or (row.winner and row.winner:lower():find(find, 1, true))
+                or (row.res and row.res:lower():find(find, 1, true))
+            if not hit then
+                for _, name in ipairs(roster.of(sess, row) or {}) do
+                    if name:lower():find(find, 1, true) then hit = true; break end
+                end
+            end
+            if hit then keep[#keep + 1] = row end
+        end
+        rows = keep
+    end
+
+    -- One comparison, read forwards or backwards. Every branch falls through
+    -- to the same tail when its own column is equal, so the order is total and
+    -- table.sort is never handed a contradiction to trip over.
+    local function Before(a, b)
+        local key = d.sort
+        if key == "count" and a.count ~= b.count then return a.count < b.count end
+        if key == "time"  and a.t     ~= b.t     then return a.t < b.t end
+        if key == "winner" then
+            -- the ones nobody has taken last, whichever way round it is read
+            local x = a.winner and a.winner:lower() or "\255"
+            local y = b.winner and b.winner:lower() or "\255"
+            if x ~= y then return x < y end
+        end
+        if a.name ~= b.name then return a.name < b.name end
+        if a.t ~= b.t then return a.t < b.t end
+        return (a.winner or "") < (b.winner or "")
+    end
+
+    table.sort(rows, function(a, b)
+        -- Grouped, the quality is the outline and the column you picked orders
+        -- what is inside each group -- so the two settings answer different
+        -- questions rather than one overruling the other.
+        if d.grouped and a.g ~= b.g then return a.g > b.g end
+        if d.dir < 0 then return Before(b, a) end
+        return Before(a, b)
+    end)
+
+    if not d.grouped then return rows end
+
+    local n = {}
+    for _, row in ipairs(rows) do n[row.g] = (n[row.g] or 0) + 1 end
+
+    local out, group = {}, nil
+    for _, row in ipairs(rows) do
+        if row.g ~= group then
+            group = row.g
+            out[#out + 1] = { header = group, n = n[group] }
+        end
+        if not d.collapsed[group] then out[#out + 1] = row end
+    end
+    return out
+end
+
+-- "Epic stackable", for a group's own line. This window is wide, so unlike the
+-- loot window's list there is room for the seam to say what it is.
+function det.caption(g)
+    return QualityLabel(math.floor(g / 2))
+        .. (g % 2 == 1 and " |cff808080stackable|r" or "")
+end
+
+function det.sortBy(key)
+    local d = db.details
+    if d.sort == key then
+        d.dir = -d.dir
+    else
+        -- counts and times are asked about biggest-first; names are not
+        d.sort, d.dir = key, (key == "count" or key == "time") and -1 or 1
+    end
+    det.refresh()
+end
+
+----------------------------------------------------------------
+
+function det.build()
+    local f = CreateFrame("Frame", "AutoPassLootAnnouncerDetails", UIParent,
+        "BasicFrameTemplateWithInset")
+    det.frame = f
+    f:SetSize(db.details.size and db.details.size.w or 700,
+              db.details.size and db.details.size.h or 460)
+    f:SetPoint("CENTER")
+    f:SetMovable(true)
+    f:SetResizable(true)
+    f:EnableMouse(true)
+    f:SetClampedToScreen(true)
+    -- With the settings panel rather than with the loot window: this is a
+    -- window you open, read and close, not one that sits over a fight.
+    f:SetFrameStrata("DIALOG")
+    f:SetToplevel(true)
+    f:Hide()
+    tinsert(UISpecialFrames, "AutoPassLootAnnouncerDetails")   -- Escape closes it
+
+    if f.SetResizeBounds then
+        f:SetResizeBounds(det.MIN_W, det.MIN_H, det.MAX_W, det.MAX_H)
+    else
+        f:SetMinResize(det.MIN_W, det.MIN_H)
+        f:SetMaxResize(det.MAX_W, det.MAX_H)
+    end
+
+    local function SavePos(self)
+        self:StopMovingOrSizing()
+        local point, _, rel, x, y = self:GetPoint()
+        db.details.pos = { point = point, rel = rel, x = x, y = y }
+    end
+
+    -- The loot window explains this one at length: resizing from a corner only
+    -- leaves the opposite corner still when that corner is what the frame
+    -- hangs from.
+    local function AnchorTopLeft(self)
+        local x, y = self:GetLeft(), self:GetTop()
+        if not x or not y then return end
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", UIParent,
+            "TOPLEFT", x - UIParent:GetLeft(), y - UIParent:GetTop())
+    end
+
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", SavePos)
+
+    if db.details.pos then
+        f:ClearAllPoints()
+        f:SetPoint(db.details.pos.point, UIParent, db.details.pos.rel,
+            db.details.pos.x, db.details.pos.y)
+    end
+
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.title:SetPoint("TOP", 0, -6)
+
+    -- Which session, here as well as in the menu that opened the window.
+    -- Comparing two nights is a reason to have this open at all, and closing it
+    -- to go and pick the other one is not comparing them.
+    f.sessionDD = CreateFrame("Frame", "APLADetailSession", f, "UIDropDownMenuTemplate")
+    f.sessionDD:SetPoint("TOPLEFT", -4, -24)
+    UIDropDownMenu_SetWidth(f.sessionDD, 150)
+    UIDropDownMenu_Initialize(f.sessionDD, function(_, level)
+        if level ~= 1 then return end
+        local function Row(text, index, n)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = text .. ("  |cff808080%d drop%s|r"):format(n, n == 1 and "" or "s")
+            info.checked = det.view == index
+            info.func = function()
+                det.view = index
+                CloseDropDownMenus()
+                det.refresh()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+        Row("Current", 0, #db.loot.entries)
+        for i, sess in ipairs(db.lootPast) do
+            Row(SessionLabel(sess), i, #sess.entries)
+        end
+    end)
+
+    -- Its own threshold, not the log's. The loot window's setting is what you
+    -- want on screen while you play; this one is a question you ask of a
+    -- session and then put back, and moving it must not change what the window
+    -- behind this one has been showing all night.
+    f.qualityDD = CreateFrame("Frame", "APLADetailQuality", f, "UIDropDownMenuTemplate")
+    f.qualityDD:SetPoint("TOPLEFT", 180, -24)
+    UIDropDownMenu_SetWidth(f.qualityDD, 150)
+    UIDropDownMenu_Initialize(f.qualityDD, function(_, level)
+        if level ~= 1 then return end
+        for q = MIN_TRACK, 5 do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = MinLabel(q)
+            info.checked = db.details.min == q
+            info.func = function()
+                db.details.min = q
+                CloseDropDownMenus()
+                det.refresh()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    local search = CreateFrame("EditBox", "APLADetailSearch", f, "InputBoxTemplate")
+    search:SetPoint("TOPLEFT", 16, -58)
+    search:SetSize(180, 20)
+    search:SetAutoFocus(false)
+    -- Live rather than on Enter: the filter is a table walk over a few hundred
+    -- rows, and typing until the thing you want is the only row left is how a
+    -- box like this gets used.
+    search:SetScript("OnTextChanged", function(self)
+        det.search = (self:GetText() or ""):lower()
+        det.refresh()
+    end)
+    search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    search:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    search:SetScript("OnEditFocusGained", function() det.refresh() end)
+    search:SetScript("OnEditFocusLost", function() det.refresh() end)
+    f.search = search
+
+    f.searchHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    f.searchHint:SetPoint("LEFT", search, "LEFT", 4, 0)
+    f.searchHint:SetText("item, winner or name")
+
+    f.grouped = MakeCheck(f, "APLADetailGrouped", "Group by quality", 206, -56,
+        "Epics first, then rares, then uncommons, and the ones that stack ahead "
+            .. "of the ones that do not, each group foldable by its own line. "
+            .. "Off, the session is one list in the order you sorted it.",
+        function(v)
+            db.details.grouped = v
+            det.refresh()
+        end)
+
+    -- The column heads, which are also how the list is sorted: the thing you
+    -- would click to sort by is the word naming the column.
+    local function Head(text, key, justify)
+        local b = CreateFrame("Button", nil, f)
+        b:SetHeight(16)
+        b.label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        b.label:SetAllPoints()
+        b.label:SetJustifyH(justify or "LEFT")
+        b.plain, b.key = text, key
+        local hl = b:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        Fill(hl, 1, 1, 1, 0.10)
+        b:SetScript("OnClick", function() det.sortBy(key) end)
+        return b
+    end
+
+    f.heads = {
+        Head("Item", "name"),
+        Head("Qty", "count", "RIGHT"),
+        Head("Winner", "winner", "RIGHT"),
+        Head("When", "time", "RIGHT"),
+    }
+
+    f.hPeople = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.hPeople:SetText("Participants")
+
+    f.rule = f:CreateTexture(nil, "ARTWORK")
+    f.rule:SetHeight(1)
+    Fill(f.rule, 1, 1, 1, 0.14)
+
+    -- Both lists scroll, because both can be longer than any window: a night
+    -- of trash runs to hundreds of rows, and a forty-man has forty names.
+    f.scroll = CreateFrame("ScrollFrame", "APLADetailScroll", f, "FauxScrollFrameTemplate")
+    f.scroll:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, det.ROW_H, det.refresh)
+    end)
+
+    f.pscroll = CreateFrame("ScrollFrame", "APLADetailPeople", f, "FauxScrollFrameTemplate")
+    f.pscroll:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, det.ROW_H, det.refresh)
+    end)
+
+    for i = 1, det.FRAMES do
+        local row = CreateFrame("Button", nil, f)
+        row:SetHeight(det.ROW_H)
+        row:RegisterForClicks("LeftButtonUp")
+
+        row.band = row:CreateTexture(nil, "BACKGROUND")
+        row.band:SetAllPoints()
+        Fill(row.band, 1, 1, 1, 0.06)
+        row.band:Hide()
+
+        local hl = row:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        Fill(hl, 1, 1, 1, 0.10)
+
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(det.ROW_H - 4, det.ROW_H - 4)
+        row.icon:SetPoint("LEFT", 2, 0)
+
+        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.text:SetPoint("LEFT", det.ROW_H + 2, 0)
+        row.text:SetJustifyH("LEFT")
+
+        row.qty = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.qty:SetWidth(30)
+        row.qty:SetJustifyH("RIGHT")
+
+        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who:SetWidth(96)
+        row.who:SetJustifyH("RIGHT")
+
+        row.at = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.at:SetWidth(40)
+        row.at:SetJustifyH("RIGHT")
+
+        row:SetScript("OnEnter", function(self)
+            if self.group then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(db.details.collapsed[self.group]
+                    and "Click to open this group" or "Click to fold this group away")
+                GameTooltip:Show()
+                return
+            end
+            if not self.link then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(self.link)
+            if self.res then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Reserved by: " .. self.res, 1, 0.82, 0, true)
+            end
+
+            -- The point of the window: who was standing there when it fell.
+            local sess  = det.session()
+            local names = self.entry and roster.of(sess, self.entry)
+            GameTooltip:AddLine(" ")
+            if names then
+                local out = {}
+                for _, name in ipairs(names) do out[#out + 1] = roster.colour(sess, name) end
+                GameTooltip:AddLine(("In the group (%d)"):format(#names), 1, 0.82, 0)
+                GameTooltip:AddLine(table.concat(out, ", "), 1, 1, 1, true)
+            else
+                GameTooltip:AddLine("The group was not recorded for this drop.",
+                    0.6, 0.6, 0.6, true)
+            end
+            if self.drops and self.drops > 1 then
+                GameTooltip:AddLine(("%d drops, the last at %s"):format(self.drops,
+                    date("%H:%M", self.latest or 0)), 0.6, 0.6, 0.6)
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnClick", function(self)
+            if self.group then
+                -- nil rather than false, so a saved file keeps only the groups
+                -- actually folded away
+                db.details.collapsed[self.group] =
+                    not db.details.collapsed[self.group] or nil
+                det.refresh()
+            elseif self.link then
+                HandleModifiedItemClick(self.link)
+            end
+        end)
+
+        row:Hide()
+        det.rows[i] = row
+
+        -- A participant. The name on the left, what they took on the right,
+        -- and how much of the session they were here for on the tooltip: the
+        -- column is one name wide, so the number beside it has to be the one
+        -- you would settle a split with.
+        local pr = CreateFrame("Frame", nil, f)
+        pr:SetHeight(det.ROW_H)
+        pr:EnableMouse(true)
+
+        pr.text = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pr.text:SetPoint("LEFT", 2, 0)
+        pr.text:SetJustifyH("LEFT")
+
+        pr.won = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pr.won:SetPoint("RIGHT", -2, 0)
+        pr.won:SetWidth(34)
+        pr.won:SetJustifyH("RIGHT")
+
+        pr:SetScript("OnEnter", function(self)
+            local p = self.person
+            if not p then return end
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:AddLine(p.name)
+            GameTooltip:AddLine(("There for %d of %d drops"):format(p.present,
+                det.drops or 0), 1, 1, 1)
+            GameTooltip:AddLine(("Won %d item%s"):format(p.won,
+                p.won == 1 and "" or "s"), 1, 1, 1)
+            if p.present == 0 then
+                GameTooltip:AddLine("Only ever seen as a winner: handed the item when "
+                    .. "the group was not recorded.", 0.6, 0.6, 0.6, true)
+            end
+            GameTooltip:Show()
+        end)
+        pr:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        pr:Hide()
+        det.people[i] = pr
+    end
+
+    f.foot = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    f.foot:SetJustifyH("LEFT")
+
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -4, 4)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function()
+        AnchorTopLeft(f)
+        f:StartSizing("BOTTOMRIGHT")
+    end)
+    grip:SetScript("OnMouseUp", function()
+        SavePos(f)
+        db.details.size = { w = f:GetWidth(), h = f:GetHeight() }
+        det.refresh()
+    end)
+
+    f:SetScript("OnSizeChanged", det.refresh)
+end
+
+-- Where everything sits at the window's current size. Only the lists and the
+-- footer move: the controls along the top hang off the top-left corner, which
+-- is not going anywhere.
+function det.layout()
+    local f = det.frame
+    local w, h  = f:GetWidth(), f:GetHeight()
+    local listW = math.max(180, w - det.SIDE - 24)
+    local top   = det.TOP
+
+    local at = { 0, listW - 172, listW - 138, listW - 40 }
+    local wide = { math.max(40, listW - 184), 30, 96, 40 }
+    for i, head in ipairs(f.heads) do
+        head:ClearAllPoints()
+        head:SetPoint("TOPLEFT", 12 + at[i], -(top - 18))
+        head:SetWidth(wide[i])
+    end
+
+    f.hPeople:ClearAllPoints()
+    f.hPeople:SetPoint("TOPLEFT", w - det.SIDE, -(top - 18))
+
+    f.rule:ClearAllPoints()
+    f.rule:SetPoint("TOPLEFT", 12, -(top - 2))
+    f.rule:SetPoint("TOPRIGHT", -12, -(top - 2))
+
+    local room  = h - top - det.FOOT
+    local shown = math.max(0, math.min(det.FRAMES, math.floor(room / det.ROW_H)))
+
+    f.scroll:ClearAllPoints()
+    f.scroll:SetPoint("TOPLEFT", 10, -top)
+    f.scroll:SetSize(math.max(1, listW - 8), math.max(1, shown * det.ROW_H))
+
+    f.pscroll:ClearAllPoints()
+    f.pscroll:SetPoint("TOPLEFT", w - det.SIDE - 2, -top)
+    f.pscroll:SetSize(math.max(1, det.SIDE - 34), math.max(1, shown * det.ROW_H))
+
+    for i = 1, det.FRAMES do
+        local y = -(top + (i - 1) * det.ROW_H)
+
+        local row = det.rows[i]
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 12, y)
+        row:SetWidth(listW - 12)
+        row.text:SetWidth(math.max(40, listW - 196))
+        row.qty:ClearAllPoints()
+        row.qty:SetPoint("RIGHT", row, "LEFT", listW - 142, 0)
+        row.who:ClearAllPoints()
+        row.who:SetPoint("RIGHT", row, "LEFT", listW - 44, 0)
+        row.at:ClearAllPoints()
+        row.at:SetPoint("RIGHT", row, "LEFT", listW - 2, 0)
+
+        local pr = det.people[i]
+        pr:ClearAllPoints()
+        pr:SetPoint("TOPLEFT", w - det.SIDE, y)
+        pr:SetWidth(det.SIDE - 40)
+        pr.text:SetWidth(math.max(20, det.SIDE - 78))
+    end
+
+    f.foot:ClearAllPoints()
+    f.foot:SetPoint("BOTTOMLEFT", 14, 10)
+    f.foot:SetPoint("BOTTOMRIGHT", -24, 10)
+
+    return shown
+end
+
+function det.refresh()
+    local f = det.frame
+    if not f or not f:IsShown() then return end
+
+    local sess, view = det.session()
+    local d = db.details
+
+    f.title:SetText("Session details - "
+        .. (view > 0 and SessionLabel(sess) or "current session"))
+    UIDropDownMenu_SetText(f.sessionDD, view > 0 and SessionLabel(sess) or "Current")
+    UIDropDownMenu_SetText(f.qualityDD, MinLabel(d.min))
+    f.grouped:SetChecked(d.grouped)
+    if f.searchHint.SetShown then
+        f.searchHint:SetShown(det.search == "" and not f.search:HasFocus())
+    elseif det.search == "" and not f.search:HasFocus() then
+        f.searchHint:Show()
+    else
+        f.searchHint:Hide()
+    end
+
+    -- An arrow on the column the list is in the order of and nothing on the
+    -- others, so which way round it is sorted is something you can see rather
+    -- than something you have to remember clicking.
+    for _, head in ipairs(f.heads) do
+        if d.sort == head.key then
+            head.label:SetText(("|cffffd100%s %s|r"):format(head.plain,
+                d.dir > 0 and "^" or "v"))
+        else
+            head.label:SetText("|cff909090" .. head.plain .. "|r")
+        end
+    end
+
+    local list  = det.list()
+    local shown = det.layout()
+
+    FauxScrollFrame_Update(f.scroll, #list, shown, det.ROW_H)
+    local offset = FauxScrollFrame_GetOffset(f.scroll)
+
+    for i, row in ipairs(det.rows) do
+        local e = (i <= shown) and list[offset + i] or nil
+        row.group, row.link, row.res, row.entry, row.drops = nil, nil, nil, nil, nil
+        row.latest = nil
+        if e and e.header then
+            row.group = e.header
+            row.band:Show()
+            row.icon:Hide()
+            row.text:SetText(("%s %s  |cff808080%d|r"):format(
+                d.collapsed[e.header] and "+" or "-", det.caption(e.header), e.n))
+            row.qty:SetText("")
+            row.who:SetText("")
+            row.at:SetText("")
+            row:Show()
+        elseif e then
+            row.link, row.res, row.entry = e.link, e.res, e
+            row.drops, row.latest = e.drops, e.t
+            row.band:Hide()
+            row.icon:Show()
+            row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
+            row.text:SetText(e.link)
+            row.qty:SetText(e.count > 1 and ("|cffffffffx" .. e.count .. "|r") or "")
+            if not e.winner and e.res then
+                row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
+            elseif e.winner then
+                row.who:SetText(roster.colour(sess, e.winner))
+            else
+                row.who:SetText("|cff606060-|r")
+            end
+            row.at:SetText(e.t > 0 and date("%H:%M", e.t) or "")
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+
+    local people, drops = roster.people(sess, d.min)
+    det.drops = drops
+
+    FauxScrollFrame_Update(f.pscroll, #people, shown, det.ROW_H)
+    local poff = FauxScrollFrame_GetOffset(f.pscroll)
+
+    for i, pr in ipairs(det.people) do
+        local p = (i <= shown) and people[poff + i] or nil
+        pr.person = p
+        if p then
+            pr.text:SetText(roster.colour(sess, p.name))
+            pr.won:SetText(p.won > 0 and ("|cffffd100" .. p.won .. "|r") or "|cff606060-|r")
+            pr:Show()
+        else
+            pr:Hide()
+        end
+    end
+
+    -- What the session came to, under the list it is the total of.
+    local copper = sess.money or 0
+    local when   = date("%d/%m %H:%M", sess.started or time())
+        .. (sess.ended and (" - " .. date("%H:%M", sess.ended)) or " - running")
+    f.foot:SetText(("|cffffffff%d|r drop%s   |cff808080%s|r   %s%s"):format(
+        drops, drops == 1 and "" or "s", when,
+        copper > 0 and GetCoinTextureString(copper, 12) or "",
+        #people > 0 and ("   |cff808080%d in the group|r"):format(#people) or ""))
+end
+
+function det.show(view)
+    if not det.frame then det.build() end
+    det.view = view or 0
+    det.search = ""
+    det.frame.search:SetText("")
+    det.frame:Show()
+    det.refresh()
+end
+
+-- The menu row and the slash command are both toggles, except that asking for
+-- a different session than the one on show raises that one rather than closing
+-- the window you were reading.
+function det.toggle(view)
+    if det.frame and det.frame:IsShown() and (view == nil or view == det.view) then
+        det.frame:Hide()
+        return
+    end
+    det.show(view)
 end
 
 ----------------------------------------------------------------
@@ -3754,6 +4729,7 @@ function RefreshAll()
         UpdateButtonLook()
     end
     RefreshRollWindow()
+    det.refresh()
     if not pop.on() then pop.gone() end
     -- whether this copy announces at all is part of a preset, so the group's
     -- election has to hear about it rather than wait for the next heartbeat
@@ -3860,6 +4836,19 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         db.loot.entries = db.loot.entries or {}
         db.loot.money   = db.loot.money or 0
 
+        -- What the details window was left set to. Its own threshold rather
+        -- than the log's -- see the window -- and `collapsed` holds only the
+        -- groups actually folded away, so it stays empty for anyone who never
+        -- folds one.
+        if type(db.details) ~= "table" then db.details = {} end
+        local d = db.details
+        d.min     = math.max(MIN_TRACK, tonumber(d.min) or MIN_TRACK)
+        d.sort    = (d.sort == "count" or d.sort == "winner" or d.sort == "time")
+                    and d.sort or "name"
+        d.dir     = (tonumber(d.dir) or 1) < 0 and -1 or 1
+        if d.grouped == nil then d.grouped = true end
+        if type(d.collapsed) ~= "table" then d.collapsed = {} end
+
         -- The sessions filed behind it, which a file written before they
         -- existed has none of. Trimmed here as well as where they are filed,
         -- so lowering the cap takes effect rather than waiting for the next
@@ -3929,6 +4918,7 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if stackWait[arg1] then
             stackWait[arg1] = nil
             RefreshRollWindow()
+            det.refresh()   -- it groups by the same answer
         end
 
     elseif event == "PLAYER_REGEN_DISABLED" then
@@ -3945,6 +4935,8 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     elseif event == "GROUP_ROSTER_UPDATE" then
         PruneToGroup()
         SendHello()
+        -- and, once it has settled, the offer of a new session
+        roster.changed()
 
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, message, _, sender = arg1, arg2, arg3, arg4
@@ -4147,6 +5139,8 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
         if not db.hud then db.grace = 0 end
         print("|cff66ccffAPLA|r loot window: " .. HudLabel(db.hud, db.grace))
         RefreshRollWindow()
+    elseif cmd == "details" or cmd == "session" then
+        det.toggle(lootView)
     elseif cmd == "popup" then
         -- Seconds, or nothing to turn it on and off. "popup" used to open the
         -- loot window, which is now "window": the popup is a window of its own

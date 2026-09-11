@@ -168,19 +168,16 @@ Off by default. **Loot window** at the bottom of the options panel cycles throug
 │▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
 │▓[Heart of Darkness] x2░░░░░░░░░░░░░ Pass   1s░│   ← red, nearly out
 ├───────────────────────────────────────────────┤
-│ Epic stackable                                │
 │ Heart of Darkness x3 ................ Aereora │
 │ Heart of Darkness x2                          │
-│ Uncommon stackable                            │
 │ Mark of the Illidari x12 ............ Perhorn │
-│ Uncommon not stackable                        │
 │ Bloodfist Helmet ..................... Isaari │
 └──────────────────────────────────────────────◢┘
 ```
 
 Above the line are pending rolls. **The countdown is the row itself**: a band the full width of it, draining away leftwards behind the item name, so how long is left reads from the corner of your eye without the number being read. It warms from green through amber to red as it goes. The seconds are there beside it for when you want the exact figure.
 
-Below the line, what already happened, **totalled per person** and **grouped by what it is**: epics first, then rares, then uncommons, and within each quality the ones that stack ahead of the ones that do not, each group under its own caption. A trash farm is settled up by its stackable epics and rares — the gems, the hearts, the marks — so those sit at the top rather than wherever the last green pushed them. Within a group the same item's rows sit together, biggest pile first: three Hearts of Darkness that all went to Aereora are one row reading `x3` rather than three lines, because what this window is being asked is who ended up with what. A drop still waiting for a name keeps a row of its own — how many are in the air is worth seeing rather than summing — and a drop still pending above is not repeated below.
+Below the line, what already happened, **totalled per person** and **sorted by what it is**: epics first, then rares, then uncommons, and within each quality the ones that stack ahead of the ones that do not. Silently, with no caption where one group gives way to the next — the colour of the link already says which quality a run of rows is, and every line spent saying it again is a line of a small window not spent on loot. A trash farm is settled up by its stackable epics and rares — the gems, the hearts, the marks — so those sit at the top rather than wherever the last green pushed them. Within a group the same item's rows sit together, biggest pile first: three Hearts of Darkness that all went to Aereora are one row reading `x3` rather than three lines, because what this window is being asked is who ended up with what. A drop still waiting for a name keeps a row of its own — how many are in the air is worth seeing rather than summing — and a drop still pending above is not repeated below.
 
 **All of it, not the latest thirty.** The list is the whole session above the **Show** threshold, however long it ran, and the rows scroll. This window is where a session of farming is added up, and a total that quietly stopped counting would be a wrong total — which is what it used to do, at thirty rows. That session's share of the coin sits in the header.
 
@@ -203,7 +200,9 @@ Right-clicking anywhere on it — header, body or a row — opens a short menu:
 | --- | --- |
 | Show | The quality threshold, as the qualities themselves: **Uncommon and better** up to **Legendary only**, each in its own colour with a tick on the one in force |
 | Showing | Which session the list is reading — **current**, or one of the filed ones, with a tick on the one you are on. Greyed until there is something filed to switch to |
+| Details of this session... | Opens the [session details](#session-details) window on whichever session is being read |
 | Start a new session | Files what is on screen and starts counting from empty. Never asks, because nothing is lost |
+| Ask when the group changes | Whether somebody joining or leaving puts the offer of a new session in this window. On by default |
 | Clear the drop log | Empties every session, this one and the filed ones with it. Asks first, unless there is nothing to lose |
 | Close this window | Same as the X |
 
@@ -232,6 +231,64 @@ While a filed session is on show the header says which, where the right-click hi
 A window quietly showing last pull's drops during this one is the only thing sessions could get wrong, so it says so, right where you are already looking for the total. Rolls pending above the list are always the live ones whichever session is being read, and **new drops always go into the current session** — looking back never stops anything being recorded.
 
 Which session you are reading is not remembered between logins — it is where you scrolled back to, not a setting — but the sessions themselves are.
+
+#### When the group changes
+
+Somebody joining or leaving is usually what the end of a session looks like: the pull is over, half the group has gone, and the next hour of drops wants counting apart from the last one. So the loot window offers it, as a line rather than as a dialog:
+
+```
+┌ Loot ─ right-click for options ── 41g 12s ─ X ┐
+│ Grendl left -- new session? [New session] [x] │
+├───────────────────────────────────────────────┤
+```
+
+**New session** does exactly what the menu entry does. **x** leaves it as one session and the line goes; it comes back the next time the group changes, not before. Doing nothing is the third answer, and the safe one — the addon never files a session on your behalf, because filing is cheap to do late and impossible to undo.
+
+It waits about five seconds for the roster to settle first. A raid re-forming, a group walking through an instance portal and one person's disconnect all arrive as a burst of roster changes, and asking on the first of them would be asking about a group that no longer existed a moment later. It also stays quiet when the session has nothing in it yet — an empty session is already a new one — and while you are reading a filed session, which is not the moment to be asked to file this one. Turn it off with **Ask when the group changes** on the right-click menu.
+
+### Session details
+
+`/apla details`, or **Details of this session...** on the loot window's right-click menu. It opens on whichever session that window is reading, and has its own picker for the rest.
+
+```
+┌ Session details - 22:47-23:15                                 X ┐
+│ [Current ▾]  [Rare and better ▾]                                │
+│ [heart____________]  ☑ Group by quality                         │
+│ Item                        Qty   Winner   When │ Participants  │
+├─────────────────────────────────────────────────┼───────────────┤
+│ - Epic stackable  2                             │ Aereora     5 │
+│   [Heart of Darkness]        x3  Aereora   22:51│ Perhorn     3 │
+│   [Heart of Darkness]        x2  Aereora   23:04│ Isaari      1 │
+│ + Epic  4                                       │ Grendl      - │
+│ - Rare                                          │               │
+│   [Skettis Belt of the Bandit]   Isaari    22:58│               │
+├─────────────────────────────────────────────────┴───────────────┤
+│ 41 drops   11/09 22:47 - 23:15   41g 12s   5 in the group      ◢│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Everything the loot window's rows have no room for:
+
+| | |
+| --- | --- |
+| Search | Filters as you type, on the item, the winner, a reserve, **or a participant** — a name finds the drops somebody was standing there for as well as the ones they won |
+| Show | Its own quality threshold, not the log's. A question you ask of a session and then put back; moving it does not change what the loot window has been showing all night |
+| Group by quality | Epics first, then rares, then uncommons, stackables ahead of the rest, each group foldable by clicking its own line. Off, the session is one flat list |
+| Sort | Click a column head: **Item**, **Qty**, **Winner** or **When**. Click it again to turn it round. Grouped, it orders what is inside each group rather than overruling the grouping |
+| Participants | Everyone the session saw, the ones who were there for most of it first, with what they won beside them. Hover for how many of the session's drops they were present for |
+| A row | Hover for the item, its reserves, and **who was in the group when it dropped**. Shift-click links it to chat, as in the loot window |
+
+Drops fold the way they do in the loot window — one row per item per winner — and per roster as well, so a fold never spans somebody joining. It is the whole session either way: the footer counts what the threshold lets through, and says when the session ran and what it paid.
+
+Position, size, threshold, sort order and which groups you folded away are remembered between logins. What you typed in the search box is not: coming back tomorrow to a window showing four of the night's rows would read as a window that had lost the rest.
+
+#### Who was in the group
+
+Every drop records the group it fell in front of. Not a copy of the roster per row — that would be the same ten names written out a few hundred times a night — but an index into the rosters the session has seen, so people coming and going costs a handful of name lists and each row costs one integer.
+
+It is read at the moment the drop is logged, because who was there when it fell is the only instant the answer matters. If the client has not filled its roster in yet — which happens for a second after a group changes — the row keeps no roster at all rather than a wrong one: a drop filed as having happened to you alone is worse than a drop with no group on it, because only one of the two is obviously missing. Rows logged before this release have none, and read as such.
+
+Names the log only ever saw as a winner are in the participant list too, and say so on their tooltip. Under master loot an item can be handed to somebody the roster walk never saw, and a participant list the winner column contradicts is worse than one with a stranger in it.
 
 #### Taking a roll back
 
@@ -408,6 +465,7 @@ line rarely lands twice in a row.
 | `/apla login <off\|on\|ask>` | What automated rolling does at login |
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
 | `/apla window` | Open or close the loot window (`/apla roll` also works) |
+| `/apla details` | Open or close the session details window (`/apla session` also works) |
 | `/apla popup [0-60]` | Seconds the drop popup shows for; no number toggles it, 0 turns it off |
 | `/apla mode <prefix\|pepe\|random>` | What it says a drop with (`/apla say` also works) |
 | `/apla pepe` | Flip between pepe and your prefix |
