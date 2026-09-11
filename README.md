@@ -162,22 +162,27 @@ Off by default. **Loot window** at the bottom of the options panel cycles throug
 **Once it is on, it stays on screen.** It does not appear and vanish — a window that comes and goes is one you cannot find, aim at, or resize. Turning it off is how you get rid of it, and the **X** in its header does exactly that.
 
 ```
-┌ Loot ─────────── right-click for options ── X ┐
+┌ Loot ─ right-click for options ── 41g 12s ─ X ┐
 │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░│
 │▓[Pattern: Swiftheal Mantle]▓▓▓▓▓▓▓▓ Pass   3s░│   ← green, draining left
 │▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
 │▓[Heart of Darkness] x2░░░░░░░░░░░░░ Pass   1s░│   ← red, nearly out
 ├───────────────────────────────────────────────┤
-│ Bloodfist Helmet ..................... Isaari │
-│ Heart of Darkness x2                          │
+│ Epic stackable                                │
 │ Heart of Darkness x3 ................ Aereora │
+│ Heart of Darkness x2                          │
+│ Uncommon stackable                            │
 │ Mark of the Illidari x12 ............ Perhorn │
+│ Uncommon not stackable                        │
+│ Bloodfist Helmet ..................... Isaari │
 └──────────────────────────────────────────────◢┘
 ```
 
 Above the line are pending rolls. **The countdown is the row itself**: a band the full width of it, draining away leftwards behind the item name, so how long is left reads from the corner of your eye without the number being read. It warms from green through amber to red as it goes. The seconds are there beside it for when you want the exact figure.
 
-Below the line, what already happened, **totalled per person**: three Hearts of Darkness that all went to Aereora are one row reading `x3` rather than three lines, because what this window is being asked is who ended up with what. A drop still waiting for a name keeps a row of its own — how many are in the air is worth seeing rather than summing — and a drop still pending above is not repeated below.
+Below the line, what already happened, **totalled per person** and **grouped by what it is**: epics first, then rares, then uncommons, and within each quality the ones that stack ahead of the ones that do not, each group under its own caption. A trash farm is settled up by its stackable epics and rares — the gems, the hearts, the marks — so those sit at the top rather than wherever the last green pushed them. Within a group the same item's rows sit together, biggest pile first: three Hearts of Darkness that all went to Aereora are one row reading `x3` rather than three lines, because what this window is being asked is who ended up with what. A drop still waiting for a name keeps a row of its own — how many are in the air is worth seeing rather than summing — and a drop still pending above is not repeated below.
+
+**All of it, not the latest thirty.** The list is the whole drop log above the **Show** threshold, however long the night was, and the rows scroll. This window is where a session of farming is added up, and a total that quietly stopped counting would be a wrong total — which is what it used to do, at thirty rows. Your share of the coin since the log was last cleared sits in the header.
 
 #### Moving, sizing, closing
 
@@ -255,7 +260,7 @@ Two more things follow:
 - **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
 - **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. A row waiting on the same number as the message wins over an older one, which is what tells two stacks of the same item apart. If the same item drops off two mobs seconds apart, two winners could in principle still land on the wrong rows. It is cosmetic when it happens.
 
-The log holds 1000 rows and drops the oldest beyond that — a long while, now that it only holds what was rolled for. It is shared across all your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
+The log holds 10,000 rows and drops the oldest beyond that — weeks of farming, and a stop on the saved file rather than anything you should meet: the loot window adds up what it shows from the whole log, so a row that fell off the front would be a drop gone from somebody's total. It is shared across all your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
 
 ### Drop popup
 

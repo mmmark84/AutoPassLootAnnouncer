@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.10.0] - 2026-09-11
+
+### Changed
+- The loot window lists **the whole drop log**, not its latest thirty rows.
+  It stopped at thirty because that was the tallest the window could get, and
+  three hours of trash went past it without anybody being told: an epic from
+  the second hour had scrolled off into nowhere while a stack of gems from the
+  first hour still showed, because totals kept adding to rows that were on
+  screen. The rows scroll now, and nothing is left out. The log's own stop
+  goes from 1000 rows to 10,000 for the same reason -- a row falling off the
+  front is a drop gone from somebody's total.
+- The list is **grouped** rather than newest-first: epics, then rares, then
+  uncommons, and within each quality the ones that stack ahead of the ones
+  that do not, each under a caption. A trash farm is settled up by its
+  stackable epics and rares, so those sit at the top. Within a group the same
+  item's rows sit together, biggest pile first, so who has the hearts is one
+  glance. Newest-first is still the popup's job, and the rolls pending above
+  the list are still the thing that just happened.
+- Whether an item stacks is written on its row when it is logged, the way its
+  quality already was, so the grouping does not depend on the client still
+  remembering the item. A row logged before this release, or one the client
+  had not seen yet, is filled in the moment the client learns the item.
+
+### Added
+- Your share of the coin since the log was last cleared, in the loot window's
+  header. The log was already keeping the figure; it had nowhere to show it.
+
 ## [1.9.1] - 2026-09-10
 
 ### Fixed

@@ -1105,7 +1105,12 @@ end
 -- The quality slider still filters the view rather than what is kept: a
 -- threshold on the way in throws away rows you cannot ask for later, where a
 -- filter on the way out can always be widened.
-local MAX_LOOT_ROWS     = 1000
+-- Ten thousand is a stop on the saved file rather than a working limit. A
+-- night of trash is a few hundred rows, and the loot window adds up what it
+-- shows from the whole log, so a row that falls off the front is a drop gone
+-- from somebody's total. This is only there so a log nobody ever clears cannot
+-- grow without end.
+local MAX_LOOT_ROWS     = 10000
 local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
 -- How long an item stays loggable after the server offered it. Longer than a
 -- roll's two minutes, because the loot message comes when the corpse is looted
@@ -1202,8 +1207,11 @@ function LogDrop(link, count, winner, offered)
     if not link then return end
 
     -- Recorded on the row rather than asked of the item later: the log outlives
-    -- the client's item cache, and this is what the window filters on.
+    -- the client's item cache, and these are what the window filters and groups
+    -- on. Whether it stacks is nil until the client has seen the item, and the
+    -- window fills that in when it can -- see EntryStacks.
     local quality = QualityOf(link)
+    local stacks  = IsStackable(link)
 
     local id = ItemID(link)
     if not id then return end
@@ -1258,10 +1266,11 @@ function LogDrop(link, count, winner, offered)
             LootChanged(row, true)
             return
         end
-        entries[#entries + 1] =
-            { id = id, link = link, count = n, winner = winner, q = quality, t = time() }
+        entries[#entries + 1] = { id = id, link = link, count = n, winner = winner,
+                                  q = quality, s = stacks, t = time() }
     else
-        entries[#entries + 1] = { id = id, link = link, count = n, q = quality, t = time() }
+        entries[#entries + 1] = { id = id, link = link, count = n,
+                                  q = quality, s = stacks, t = time() }
     end
 
     db.loot.started = db.loot.started or time()
@@ -1361,8 +1370,8 @@ function LogAnnounced(link, reserves)
         end
     end
 
-    local e = { id = id, link = link, count = 1, q = QualityOf(link), t = time(),
-                announced = true, res = reserves }
+    local e = { id = id, link = link, count = 1, q = QualityOf(link), s = IsStackable(link),
+                t = time(), announced = true, res = reserves }
     entries[#entries + 1] = e
     lastAnnounced, lastAnnouncedAt = e, time()
 
@@ -2376,6 +2385,25 @@ local function EntryQuality(e)
     return e.q
 end
 
+-- Whether the row's item stacks, kept on the row for the same reason. The
+-- client only knows once it has seen the item, which after a fresh login it
+-- may not have, so a row without the answer is asked again on every redraw
+-- and its item is noted, so that the client saying "here it is" can redraw the
+-- window -- GET_ITEM_INFO_RECEIVED, down in the events. Until then the row
+-- reads as one that does not stack.
+local stackWait = {}   -- [itemID] = true while a row waits on the client for it
+local function EntryStacks(e)
+    if e.s == nil then
+        local s = IsStackable(e.link)
+        if s == nil then
+            stackWait[e.id] = true
+            return false
+        end
+        e.s = s
+    end
+    return e.s
+end
+
 -- "Hikø +2" out of "Hikø, Perhorn, Grendl". The winner column is one name
 -- wide and the row is not worth widening for a list that is on its tooltip
 -- anyway, so the column says who is first in line and how many are behind.
@@ -2415,9 +2443,15 @@ local ROLL_ROW_H      = 18   -- a pending roll
 local ROLL_RECENT_H   = 16   -- a line of what already happened
 local ROLL_FOOTER     = 8
 local MAX_ROLL_ROWS   = 8    -- a raid boss drops five or six at once at most
-local MAX_ROLL_RECENT = 30   -- enough for the tallest the window is allowed to get
 local ROLL_MIN_W, ROLL_MIN_H = 260, 120
 local ROLL_MAX_W, ROLL_MAX_H = 600, 700
+-- Row frames for the list of what dropped: as many as fit the window at its
+-- tallest with nothing pending above them. That is how many are on screen at
+-- once, and says nothing about how many there are -- the list has no cap, and
+-- the scroll bar goes the rest of the way. It used to stop at thirty rows,
+-- which three hours of trash went past without anybody being told.
+local ROLL_RECENT_FRAMES =
+    math.ceil((ROLL_MAX_H - ROLL_HEADER - 4 - ROLL_FOOTER) / ROLL_RECENT_H)
 
 local rollWin
 local pendingRolls = {}   -- [rollID] = { action, link, itemID, grace, deadline }
@@ -2467,16 +2501,47 @@ end
 ----------------------------------------------------------------
 -- The window
 ----------------------------------------------------------------
--- The drop log's newest rows rather than a second list of its own, so the
--- quality slider in the log window filters this too and there is only ever one
--- list to keep straight.
+-- The drop log read whole rather than a second list of its own, so the
+-- quality threshold on the right-click menu filters this too and there is only
+-- ever one list to keep straight. The whole of it: this window is where a
+-- night of farming is added up, and a total that quietly stops counting at
+-- thirty rows is a wrong total. The rows scroll; nothing is left out.
 --
 -- One row per item per winner rather than one per drop: three Hearts of
 -- Darkness that all went the same way read as an "x3" beside the name, which
 -- is the question this window is being asked -- who ended up with what. The
 -- log itself is still a drop a row, so the popup goes on showing only the ones
 -- that landed while it was up.
+--
+-- Grouped rather than in the order they fell: epics first, then rares, then
+-- uncommons, and within each quality the ones that stack ahead of the ones
+-- that do not. A trash farm is settled up by its stackable epics and rares --
+-- the gems, the hearts, the marks -- and those belong at the top rather than
+-- wherever the last green pushed them. Within a group the same item's rows sit
+-- together, biggest pile first, so "who has the hearts" is one glance rather
+-- than a search. Newest-first is the popup's job, and the rolls pending above
+-- this list are still the thing that just happened.
 local function RecentEntries()
+    local function Group(e)   -- higher sorts first
+        return EntryQuality(e) * 2 + (EntryStacks(e) and 1 or 0)
+    end
+
+    local function Caption(g)
+        return QualityLabel(math.floor(g / 2))
+            .. (g % 2 == 1 and " |cff808080stackable|r" or " |cff808080not stackable|r")
+    end
+
+    local function Before(a, b)
+        if a.g ~= b.g then return a.g > b.g end
+        if a.name ~= b.name then return a.name < b.name end
+        -- taken ahead of still lying there; the biggest share first among the
+        -- taken, the newest first among the rest
+        if (a.winner == nil) ~= (b.winner == nil) then return a.winner ~= nil end
+        if a.count ~= b.count then return a.count > b.count end
+        if a.winner ~= b.winner then return a.winner < b.winner end
+        return a.t > b.t
+    end
+
     -- START_LOOT_ROLL puts a winner-less row in the log for the same drop that
     -- is sitting in the pending list above, and one item on two lines of a
     -- small window is noise. Skipped until it has a winner, at which point it
@@ -2491,7 +2556,7 @@ local function RecentEntries()
     -- many of those are up is worth seeing rather than summing.
     local folded = {}
 
-    local out, all = {}, db.loot.entries
+    local rows, all = {}, db.loot.entries
     for i = #all, 1, -1 do
         local e = all[i]
         local stillRolling = waiting[e.id] and not e.winner
@@ -2499,20 +2564,33 @@ local function RecentEntries()
             local into = e.winner and folded[e.id] and folded[e.id][e.winner]
             if into then
                 into.count = into.count + (e.count or 1)
-            elseif #out < MAX_ROLL_RECENT then
+            else
                 -- A copy of the row, not the row: a total is this window's
                 -- reading of the log, and nothing the log should be told.
                 local row = { id = e.id, link = e.link, count = e.count or 1,
-                              winner = e.winner, res = e.res, q = e.q, t = e.t }
-                out[#out + 1] = row
+                              winner = e.winner, res = e.res, q = e.q, t = e.t or 0,
+                              g = Group(e),
+                              name = (e.link:match("%[(.-)%]") or e.link):lower() }
+                rows[#rows + 1] = row
                 if e.winner then
                     folded[e.id] = folded[e.id] or {}
                     folded[e.id][e.winner] = row
                 end
             end
-            -- Past the last row there is window for we keep reading, because
-            -- an older drop can still belong to a total that is on show.
         end
+    end
+    table.sort(rows, Before)
+
+    -- A caption where one group gives way to the next, so the split reads
+    -- without knowing the rule. It is a row of the list like any other, which
+    -- is what lets it scroll with the rest.
+    local out, group = {}, nil
+    for _, row in ipairs(rows) do
+        if row.g ~= group then
+            group = row.g
+            out[#out + 1] = { header = Caption(group) }
+        end
+        out[#out + 1] = row
     end
     return out
 end
@@ -2585,8 +2663,18 @@ function RefreshRollWindow()
 
     for i, row in ipairs(rollWin.recent) do
         local e = (i <= shown) and recent[offset + i] or nil
-        if e then
+        if e and e.header then
+            -- a group caption: no item, so nothing to hover, link or click
+            row.link, row.res = nil, nil
+            row.icon:Hide()
+            row.band:Show()
+            row.text:SetText(e.header)
+            row.who:SetText("")
+            row:Show()
+        elseif e then
             row.link, row.res = e.link, e.res
+            row.icon:Show()
+            row.band:Hide()
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
             row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
                 or e.link)
@@ -2604,6 +2692,11 @@ function RefreshRollWindow()
 
     -- a divider only when there is something on both sides of it
     if npend > 0 and #recent > 0 then rollWin.rule:Show() else rollWin.rule:Hide() end
+
+    -- Nothing rather than "0c": a window that has never seen a copper has
+    -- nothing to say about it.
+    local copper = db.loot.money or 0
+    rollWin.money:SetText(copper > 0 and GetCoinTextureString(copper, 12) or "")
 
     if npend == 0 and #recent == 0 then
         -- The one dependency worth spelling out: the drops half of this window
@@ -2863,6 +2956,16 @@ local function BuildRollWindow()
     close:SetPoint("RIGHT", 1, 0)
     close:SetScript("OnClick", function() CloseRollWindow() end)
 
+    -- Your share of the coin since the log was last cleared. A farm is measured
+    -- in what it paid as well as in what it dropped, and the log was already
+    -- keeping the figure with nowhere to show it. Stretched between the hint
+    -- and the X and right-aligned, so it sits on neither however narrow the
+    -- window is dragged.
+    rollWin.money = head:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rollWin.money:SetPoint("LEFT", hintText, "RIGHT", 8, 0)
+    rollWin.money:SetPoint("RIGHT", close, "LEFT", -2, 0)
+    rollWin.money:SetJustifyH("RIGHT")
+
     rollWin.rule = rollWin:CreateTexture(nil, "ARTWORK")
     rollWin.rule:SetHeight(1)
     Fill(rollWin.rule, 1, 1, 1, 0.14)
@@ -2937,8 +3040,15 @@ local function BuildRollWindow()
     rollWin.scroll = scroll
 
     rollWin.recent = {}
-    for i = 1, MAX_ROLL_RECENT do
+    for i = 1, ROLL_RECENT_FRAMES do
         local row = MakeRollRow(rollWin, ROLL_RECENT_H)
+
+        -- Faint, and only under a group caption, so the captions read as the
+        -- seams of the list rather than as rows of it.
+        row.band = row:CreateTexture(nil, "BACKGROUND")
+        row.band:SetAllPoints()
+        Fill(row.band, 1, 1, 1, 0.06)
+        row.band:Hide()
 
         row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.who:SetPoint("RIGHT", -2, 0)
@@ -3018,7 +3128,7 @@ function LayoutRollWindow(npend)
 
     local shown = math.floor((h - y - ROLL_FOOTER) / ROLL_RECENT_H)
     if shown < 0 then shown = 0 end
-    if shown > MAX_ROLL_RECENT then shown = MAX_ROLL_RECENT end
+    if shown > ROLL_RECENT_FRAMES then shown = ROLL_RECENT_FRAMES end
 
     rollWin.scroll:ClearAllPoints()
     rollWin.scroll:SetPoint("TOPLEFT", 4, -y)
@@ -3473,6 +3583,10 @@ f:RegisterEvent("CHAT_MSG_ADDON")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 f:RegisterEvent("CHAT_MSG_LOOT")
 f:RegisterEvent("CHAT_MSG_MONEY")
+-- The client saying it now knows an item, which is when a logged row can find
+-- out whether it stacks. Guarded, because a client without the event refuses
+-- to register it, and the window gets by without.
+pcall(f.RegisterEvent, f, "GET_ITEM_INFO_RECEIVED")
 -- The popup is not on screen in a fight, and what dropped during one is shown
 -- the moment it ends.
 f:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -3610,6 +3724,14 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     elseif event == "CHAT_MSG_MONEY" then
         LogMoney(MoneyFromText(arg1 or ""))
+
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
+        -- only when a row on show was waiting on this item; the event fires
+        -- for every tooltip and bag the client fills in
+        if stackWait[arg1] then
+            stackWait[arg1] = nil
+            RefreshRollWindow()
+        end
 
     elseif event == "PLAYER_REGEN_DISABLED" then
         pop.duck()
