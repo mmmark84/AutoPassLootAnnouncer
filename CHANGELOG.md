@@ -23,6 +23,23 @@
   remembering the item. A row logged before this release, or one the client
   had not seen yet, is filled in the moment the client learns the item.
 
+### Fixed
+- The loot window **jumped to the cursor** the moment you started dragging it
+  by its body. A script handler is called with the button that started the
+  drag, `StartMoving`'s one argument is "start from where the mouse is rather
+  than from where the frame is", and a string is a yes -- so handing it
+  `StartMoving` directly answered a question nobody asked. The header was
+  already wrapped, which is why dragging by the header behaved. The options
+  panel, the share-code window and the login prompt carried the same line and
+  are wrapped too.
+- The loot window's **resize grip walked out from under the cursor** and left
+  the window a size you had not asked for. It was anchored by its centre, so
+  sizing from the bottom-right grew it both ways at once: the corner you were
+  holding moved at half the speed of the cursor while the window crept up and
+  left. It is anchored by its top-left corner before sizing now, so the corner
+  you drag is the corner that moves. The position is filed alongside the size
+  as well, so a resize no longer undoes itself at the next login.
+
 ### Added
 - Your share of the coin since the log was last cleared, in the loot window's
   header. The log was already keeping the figure; it had nowhere to show it.

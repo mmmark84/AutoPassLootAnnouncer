@@ -1488,8 +1488,11 @@ local function BuildArmPrompt()
     armPrompt:SetMovable(true)
     armPrompt:EnableMouse(true)
     armPrompt:RegisterForDrag("LeftButton")
-    armPrompt:SetScript("OnDragStart", armPrompt.StartMoving)
-    armPrompt:SetScript("OnDragStop", armPrompt.StopMovingOrSizing)
+    -- Wrapped, so the button the drag started with cannot arrive as
+    -- StartMoving's "start from the mouse" flag and jump the window to the
+    -- cursor -- see the loot window, where that is spelled out.
+    armPrompt:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    armPrompt:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     armPrompt:SetClampedToScreen(true)
     armPrompt:SetFrameStrata("DIALOG")   -- the same strata as the rest, see the panel
     armPrompt:SetToplevel(true)
@@ -1907,8 +1910,11 @@ local function BuildPresetCode()
     presetCode:SetMovable(true)
     presetCode:EnableMouse(true)
     presetCode:RegisterForDrag("LeftButton")
-    presetCode:SetScript("OnDragStart", presetCode.StartMoving)
-    presetCode:SetScript("OnDragStop", presetCode.StopMovingOrSizing)
+    -- Wrapped, so the button the drag started with cannot arrive as
+    -- StartMoving's "start from the mouse" flag and jump the window to the
+    -- cursor -- see the loot window, where that is spelled out.
+    presetCode:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    presetCode:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     presetCode:SetClampedToScreen(true)
     presetCode:SetFrameStrata("DIALOG")   -- the same strata as the other two, see the panel
     presetCode:SetToplevel(true)
@@ -1999,8 +2005,11 @@ local function BuildPanel()
     panel:SetMovable(true)
     panel:EnableMouse(true)
     panel:RegisterForDrag("LeftButton")
-    panel:SetScript("OnDragStart", panel.StartMoving)
-    panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
+    -- Wrapped, so the button the drag started with cannot arrive as
+    -- StartMoving's "start from the mouse" flag and jump the window to the
+    -- cursor -- see the loot window, where that is spelled out.
+    panel:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    panel:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     panel:SetClampedToScreen(true)
     -- Both of the addon's windows sit in one strata and raise on click. Left on
     -- the default they inherit MEDIUM with frame levels handed out in creation
@@ -2901,10 +2910,34 @@ local function BuildRollWindow()
         db.rollPos = { point = point, rel = rel, x = x, y = y }
     end
 
+    -- Resizing from the bottom-right has to leave the top-left corner where it
+    -- is, and that only happens when the top-left is what the window hangs
+    -- from. Anchored by its centre -- which is where it starts, and what a
+    -- move leaves it as -- it grows both ways at once instead: the corner you
+    -- are holding travels at half the speed of the cursor, so the grip walks
+    -- out from under you and the window creeps up and left as it gets bigger.
+    --
+    -- Converting the anchor first is free: same size, same place, and nothing
+    -- else cares which corner it is measured from. No scale arithmetic because
+    -- the window sets none of its own, so its coordinates are UIParent's.
+    local function AnchorTopLeft(self)
+        local x, y = self:GetLeft(), self:GetTop()
+        if not x or not y then return end
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", UIParent,
+            "TOPLEFT", x - UIParent:GetLeft(), y - UIParent:GetTop())
+    end
+
     -- Draggable by the body as well as the header, because a window you have
     -- to aim at is a window you swear at.
     rollWin:RegisterForDrag("LeftButton")
-    rollWin:SetScript("OnDragStart", rollWin.StartMoving)
+    -- Wrapped rather than handed StartMoving itself. A script handler is called
+    -- with the button that started the drag, StartMoving's one argument is
+    -- "start from where the mouse is rather than from where the frame is", and
+    -- a string is a yes -- so the window jumped to the cursor the instant you
+    -- grabbed it. The header alongside this has always been wrapped, which is
+    -- why dragging by the header behaved and dragging by the body did not.
+    rollWin:SetScript("OnDragStart", function(self) self:StartMoving() end)
     rollWin:SetScript("OnDragStop", SavePos)
     rollWin:SetScript("OnMouseUp", function(_, mouseButton)
         if mouseButton == "RightButton" then ShowRollMenu() end
@@ -3080,9 +3113,15 @@ local function BuildRollWindow()
     grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    grip:SetScript("OnMouseDown", function() rollWin:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseDown", function()
+        AnchorTopLeft(rollWin)
+        rollWin:StartSizing("BOTTOMRIGHT")
+    end)
     grip:SetScript("OnMouseUp", function()
-        rollWin:StopMovingOrSizing()
+        -- The sizing moved the anchor as well as the size, so the position is
+        -- filed too -- without it the next login puts the window back where it
+        -- sat before the drag. SavePos stops the sizing on its way past.
+        SavePos(rollWin)
         db.rollSize = { w = rollWin:GetWidth(), h = rollWin:GetHeight() }
         RefreshRollWindow()
     end)
