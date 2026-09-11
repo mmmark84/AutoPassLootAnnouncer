@@ -39,6 +39,9 @@ read_globals = {
     "GameTooltip", "GetCursorPosition", "GetItemInfo", "GetLootRollItemInfo",
     "GetLootRollItemLink", "GetLootRollTimeLeft", "GetNumGroupMembers", "GetTime",
     "ITEM_QUALITY_COLORS", "IsInGroup", "IsInRaid", "Minimap",
+    -- the class a group member is, and the colour for it, so a name can be
+    -- written in the participant list the way the game writes names
+    "UnitClass", "RAID_CLASS_COLORS",
     "InCombatLockdown", "IsInInstance", "MouseIsOver",
     -- An instance group -- a battleground, an arena, a dungeon-finder party --
     -- takes INSTANCE_CHAT rather than RAID, and the constant that names one is
