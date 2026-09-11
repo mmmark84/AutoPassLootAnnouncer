@@ -41,8 +41,19 @@
   as well, so a resize no longer undoes itself at the next login.
 
 ### Added
+- **Sessions**, on the loot window's right-click menu. **Start a new session**
+  files what is on screen and starts counting from empty, the way a damage
+  meter splits a fight off into its own segment, and the last ten filed
+  sessions are kept for **Showing** to switch back to. "What did that boss
+  drop" and "what has tonight dropped" are different questions, and the only
+  way to ask the first one used to be **Clear the drop log**, which lost the
+  answer to the second. Clearing is now only for when you want the lot gone:
+  it empties the current session and every filed one with it. The header names
+  the session being read while it is not the current one, and new drops always
+  go into the current one however far back you are looking.
 - Your share of the coin since the log was last cleared, in the loot window's
   header. The log was already keeping the figure; it had nowhere to show it.
+  It is that session's share now, like the rows under it.
 
 ## [1.9.1] - 2026-09-10
 

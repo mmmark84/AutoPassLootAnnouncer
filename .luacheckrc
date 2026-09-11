@@ -55,6 +55,8 @@ read_globals = {
     "GroupLootContainer", "GroupLootContainer_RemoveFrame",
     "GroupLootFrame_OpenNewFrame",
     "UIDropDownMenu_CreateInfo", "UIDropDownMenu_Initialize",
+    -- which parent row a dropdown's second level was opened from
+    "UIDROPDOWNMENU_MENU_VALUE",
     "UIDropDownMenu_JustifyText", "UIDropDownMenu_SetText",
     "UIDropDownMenu_SetWidth", "ToggleDropDownMenu",
 }

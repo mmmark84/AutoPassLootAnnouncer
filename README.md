@@ -66,7 +66,7 @@ There is no Save button, deliberately. The live settings **are** the active pres
 | | |
 | --- | --- |
 | **In a preset** | Announce on or off, the quality threshold, the channel cap, the chat prefix, what it says the drop with, the loot window and its grace period, the drop popup, the Show threshold, and all three roll grids |
-| **Not in a preset** | **At login**, where the windows sit, whether the minimap button is shown, the drop log itself, the debug flag |
+| **Not in a preset** | **At login**, where the windows sit, whether the minimap button is shown, the drop log and its sessions, the debug flag |
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
 
@@ -182,7 +182,7 @@ Above the line are pending rolls. **The countdown is the row itself**: a band th
 
 Below the line, what already happened, **totalled per person** and **grouped by what it is**: epics first, then rares, then uncommons, and within each quality the ones that stack ahead of the ones that do not, each group under its own caption. A trash farm is settled up by its stackable epics and rares — the gems, the hearts, the marks — so those sit at the top rather than wherever the last green pushed them. Within a group the same item's rows sit together, biggest pile first: three Hearts of Darkness that all went to Aereora are one row reading `x3` rather than three lines, because what this window is being asked is who ended up with what. A drop still waiting for a name keeps a row of its own — how many are in the air is worth seeing rather than summing — and a drop still pending above is not repeated below.
 
-**All of it, not the latest thirty.** The list is the whole drop log above the **Show** threshold, however long the night was, and the rows scroll. This window is where a session of farming is added up, and a total that quietly stopped counting would be a wrong total — which is what it used to do, at thirty rows. Your share of the coin since the log was last cleared sits in the header.
+**All of it, not the latest thirty.** The list is the whole session above the **Show** threshold, however long it ran, and the rows scroll. This window is where a session of farming is added up, and a total that quietly stopped counting would be a wrong total — which is what it used to do, at thirty rows. That session's share of the coin sits in the header.
 
 #### Moving, sizing, closing
 
@@ -202,10 +202,36 @@ Right-clicking anywhere on it — header, body or a row — opens a short menu:
 | | |
 | --- | --- |
 | Show | The quality threshold, as the qualities themselves: **Uncommon and better** up to **Legendary only**, each in its own colour with a tick on the one in force |
-| Clear the drop log | Empties the log and starts a new session. Asks first, unless there is nothing to lose |
+| Showing | Which session the list is reading — **current**, or one of the filed ones, with a tick on the one you are on. Greyed until there is something filed to switch to |
+| Start a new session | Files what is on screen and starts counting from empty. Never asks, because nothing is lost |
+| Clear the drop log | Empties every session, this one and the filed ones with it. Asks first, unless there is nothing to lose |
 | Close this window | Same as the X |
 
 The threshold is one setting shared by this window and the popup, and it starts at **uncommon**: nothing below that is ever logged, because the server only rolls for items at the group's loot threshold and up. Offering the qualities by name and colour rather than as a slider position means you pick the thing you want by looking at it instead of translating a position into a quality.
+
+#### Sessions
+
+**Start a new session** files what the window is showing and starts counting from empty — the same move a damage meter makes when it splits a fight off into its own segment. The last **ten** filed sessions are kept, and **Showing** on the right-click menu switches between them and the current one, each row saying when it ran and how many drops are in it.
+
+```
+  Sessions
+  Showing: current            ▸   ✓ Current          12 drops
+  Start a new session               22:47-23:15      41 drops
+  Clear the drop log                21:03-22:40      88 drops
+                                    11/09 19:12-20:40  57 drops
+```
+
+That exists because **what did that boss drop** and **what has tonight dropped** are different questions, and the only way to ask the first one used to be to clear the log — which lost the answer to the second. Clearing is now only for when you want the lot gone.
+
+While a filed session is on show the header says which, where the right-click hint usually sits:
+
+```
+┌ Loot ─ session 22:47-23:15 ── 41g 12s ─ X ┐
+```
+
+A window quietly showing last pull's drops during this one is the only thing sessions could get wrong, so it says so, right where you are already looking for the total. Rolls pending above the list are always the live ones whichever session is being read, and **new drops always go into the current session** — looking back never stops anything being recorded.
+
+Which session you are reading is not remembered between logins — it is where you scrolled back to, not a setting — but the sessions themselves are.
 
 #### Taking a roll back
 
@@ -260,7 +286,7 @@ Two more things follow:
 - **You only log what you were there for.** Loot taken while you are offline, or before you joined the group, never happened as far as the addon is concerned.
 - **Pairing a winner to a drop is a heuristic.** A loot message is matched to the oldest row for that item still waiting on a winner, within three minutes — thirty for an announced one, since a loot master takes longer than a roll. A row waiting on the same number as the message wins over an older one, which is what tells two stacks of the same item apart. If the same item drops off two mobs seconds apart, two winners could in principle still land on the wrong rows. It is cosmetic when it happens.
 
-The log holds 10,000 rows and drops the oldest beyond that — weeks of farming, and a stop on the saved file rather than anything you should meet: the loot window adds up what it shows from the whole log, so a row that fell off the front would be a drop gone from somebody's total. It is shared across all your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
+Each session holds 10,000 rows and drops the oldest beyond that — weeks of farming, and a stop on the saved file rather than anything you should meet: the loot window adds up what it shows from the whole session, so a row that fell off the front would be a drop gone from somebody's total. Ten filed sessions are kept behind the current one, oldest off the end. All of it is shared across your characters, kept between logins, and emptied only by **Clear the drop log** on the right-click menu.
 
 ### Drop popup
 

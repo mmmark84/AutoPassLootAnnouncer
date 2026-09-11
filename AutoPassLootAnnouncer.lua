@@ -1072,8 +1072,15 @@ end
 -- The drop log
 ----------------------------------------------------------------
 -- A session lasts as long as you leave it: the log is saved between logins and
--- emptied only when you ask, so a night of trash runs with a logout in
+-- ends only when you ask, so a night of trash runs with a logout in
 -- the middle is still one list.
+--
+-- Asking for a new one files the old one rather than throwing it away, and the
+-- loot window's menu picks which of them it is reading -- the way a damage
+-- meter keeps its segments, and for the same reason. "What did that boss drop"
+-- and "what has tonight dropped" are different questions, and the only way to
+-- ask the first one used to be to clear the log, which lost the answer to the
+-- second. Clearing is what it is for now: the lot, filed sessions included.
 --
 -- What the log is: the drops that were put to the group. An item the server
 -- rolled for -- the window you would have answered without this addon -- and,
@@ -1105,12 +1112,16 @@ end
 -- The quality slider still filters the view rather than what is kept: a
 -- threshold on the way in throws away rows you cannot ask for later, where a
 -- filter on the way out can always be widened.
--- Ten thousand is a stop on the saved file rather than a working limit. A
--- night of trash is a few hundred rows, and the loot window adds up what it
--- shows from the whole log, so a row that falls off the front is a drop gone
--- from somebody's total. This is only there so a log nobody ever clears cannot
--- grow without end.
+-- Ten thousand is a stop on the saved file rather than a working limit, and it
+-- is per session. A night of trash is a few hundred rows, and the loot window
+-- adds up what it shows from the whole session, so a row that falls off the
+-- front is a drop gone from somebody's total. This is only there so a log
+-- nobody ever clears cannot grow without end.
 local MAX_LOOT_ROWS     = 10000
+-- How many filed sessions are kept behind the one being recorded, oldest off
+-- the end. A night is a handful of pulls worth keeping apart; a saved file is
+-- not the place for a month of them.
+local MAX_LOOT_SESSIONS = 10
 local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
 -- How long an item stays loggable after the server offered it. Longer than a
 -- roll's two minutes, because the loot message comes when the corpse is looted
@@ -1119,6 +1130,34 @@ local LOOT_MATCH_WINDOW = 180   -- seconds a row waits for its winner
 -- stale entry cannot let one of those through.
 local ROLL_MEMORY       = 600
 local rolled = {}   -- [itemID] = when the server last put it up for a roll
+
+-- Which session the loot window is reading. 0 is the one being recorded, which
+-- is the only one anything ever writes to; 1 and up index db.lootPast, newest
+-- first. Not saved: it is where you have looked back to rather than a setting,
+-- and coming back tomorrow to a window quietly showing last night would be a
+-- bug rather than a convenience.
+local lootView = 0
+
+local function ViewedLoot()
+    if lootView > 0 then
+        local s = db.lootPast and db.lootPast[lootView]
+        if s then return s, lootView end
+        lootView = 0   -- cleared, or trimmed off the end, under us
+    end
+    return db.loot, 0
+end
+
+-- What a filed session is called, in the menu that picks it and in the header
+-- while it is on show. When it ran is the only thing that tells two of them
+-- apart; one from today needs the clock alone, an older one says the day too.
+local function SessionLabel(s)
+    local from  = s.started or s.ended or time()
+    local clock = date("%H:%M", from)
+    if date("%x", from) ~= date("%x") then clock = date("%d/%m %H:%M", from) end
+    if not s.ended then return clock end
+    return clock .. "-" .. date("%H:%M", s.ended)
+end
+
 -- A master-looted item waits on the loot master rather than on a ten-second
 -- roll, and that can be most of a boss fight later, so an announced row is
 -- given the rest of the raid to find its name.
@@ -1388,19 +1427,46 @@ function LogMoney(copper)
     RefreshRollWindow()
 end
 
+-- "That pull is done, start counting again", which is the one thing Clear used
+-- to be asked to do and the one thing it was bad at: the night's totals went
+-- with the pull. The old session is filed rather than dropped, the oldest falls
+-- off the end, and nothing here needs confirming because nothing is lost.
+local function NewLootSession()
+    local s = db.loot
+    if #s.entries == 0 and (s.money or 0) == 0 then
+        print("|cff66ccffAPLA|r nothing logged yet, so this is already a new session")
+        return
+    end
+
+    s.ended = time()
+    table.insert(db.lootPast, 1, s)
+    while #db.lootPast > MAX_LOOT_SESSIONS do table.remove(db.lootPast) end
+
+    db.loot = { entries = {}, money = 0, started = time() }
+    -- The row a "Reserved by" line would have landed on belongs to the session
+    -- just filed, and a reserve arriving now is not about it.
+    lootView, lastAnnounced = 0, nil
+    LootChanged()
+    print(("|cff66ccffAPLA|r new session started; %s filed, %d kept")
+        :format(SessionLabel(db.lootPast[1]), #db.lootPast))
+end
+
 function ClearLog()
     db.loot = { entries = {}, money = 0, started = time() }
+    db.lootPast = {}
+    lootView, lastAnnounced = 0, nil
     LootChanged()
-    print("|cff66ccffAPLA|r drop log cleared, new session started")
+    print("|cff66ccffAPLA|r drop log cleared, every session with it")
 end
 
 -- A night of drops, and nothing that brings them back. It is one button in the
 -- log window, where you went deliberately, but it is also an entry in a menu
 -- you open to change a quality filter, and a slip there should not cost the
--- night. So both go through here.
+-- night. So both go through here. New session is the one that does not ask,
+-- because it is also the one that keeps what it moves out of the way.
 StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_CLEAR_LOG"] = {
-    text = "Empty the drop log?\n\nEverything recorded this session goes, here and in "
-        .. "the loot window, and a new session starts.",
+    text = "Empty the drop log?\n\nEverything recorded goes -- this session and "
+        .. "every filed one behind it, here and in the loot window -- and a new session starts.",
     button1 = "Clear it",
     button2 = "Cancel",
     OnAccept = function() ClearLog() end,
@@ -1411,7 +1477,7 @@ StaticPopupDialogs["AUTOPASSLOOTANNOUNCER_CLEAR_LOG"] = {
 }
 
 local function ConfirmClearLog()
-    if #db.loot.entries == 0 and (db.loot.money or 0) == 0 then
+    if #db.loot.entries == 0 and (db.loot.money or 0) == 0 and #db.lootPast == 0 then
         ClearLog()   -- nothing to lose, so do not ask
         return
     end
@@ -2225,6 +2291,10 @@ local function BuildPanel()
             .. "and counts down to it, with Blizzard's window held back for those rolls only.",
         "Click a row there to take that one back: the auto-roll is dropped and the normal roll "
             .. "window opens for it, with the full timer still on it.",
+        "Right-click it for the |cffffd100Show|r threshold and for sessions: |cffffd100Start a "
+            .. "new session|r files what is on screen and counts again from empty, with the last "
+            .. "ten kept to switch back to. |cffffd100Clear the drop log|r is the one that "
+            .. "empties the lot.",
         "Doing nothing still rolls for you. That is the point of it.",
     })
 
@@ -2555,9 +2625,17 @@ local function RecentEntries()
     -- is sitting in the pending list above, and one item on two lines of a
     -- small window is noise. Skipped until it has a winner, at which point it
     -- has stopped being the thing overhead and become the thing that happened.
+    --
+    -- Only for the session being recorded, though. A roll pending now has
+    -- nothing to do with a row in a session filed two pulls ago, and hiding
+    -- one because the same item happens to be in the air would take it out of
+    -- that session's totals.
+    local sess, view = ViewedLoot()
     local waiting = {}
-    for _, p in pairs(pendingRolls) do
-        if p.itemID then waiting[p.itemID] = true end
+    if view == 0 then
+        for _, p in pairs(pendingRolls) do
+            if p.itemID then waiting[p.itemID] = true end
+        end
     end
 
     -- [itemID][winner] = the row already standing for those drops. Only won
@@ -2565,7 +2643,7 @@ local function RecentEntries()
     -- many of those are up is worth seeing rather than summing.
     local folded = {}
 
-    local rows, all = {}, db.loot.entries
+    local rows, all = {}, sess.entries
     for i = #all, 1, -1 do
         local e = all[i]
         local stillRolling = waiting[e.id] and not e.winner
@@ -2702,15 +2780,28 @@ function RefreshRollWindow()
     -- a divider only when there is something on both sides of it
     if npend > 0 and #recent > 0 then rollWin.rule:Show() else rollWin.rule:Hide() end
 
+    local sess, view = ViewedLoot()
+
+    -- Which session is on screen, in the space the "right-click for options"
+    -- hint has. A window quietly showing last pull's drops while this pull is
+    -- dropping is the one thing sessions could get wrong, so it says so, and
+    -- says it where you are already looking for the total.
+    rollWin.where:SetText(view > 0
+        and ("|cffffd100session " .. SessionLabel(sess) .. "|r")
+        or "right-click for options")
+
     -- Nothing rather than "0c": a window that has never seen a copper has
-    -- nothing to say about it.
-    local copper = db.loot.money or 0
+    -- nothing to say about it. Of this session, like the rows under it.
+    local copper = sess.money or 0
     rollWin.money:SetText(copper > 0 and GetCoinTextureString(copper, 12) or "")
 
     if npend == 0 and #recent == 0 then
         -- The one dependency worth spelling out: the drops half of this window
-        -- reads the drop log, and there is no log until tracking is on.
-        rollWin.hint:SetText("Nothing yet.")
+        -- reads the drop log, and there is no log until tracking is on. A
+        -- filed session is never empty, so an empty one here is the threshold.
+        rollWin.hint:SetText(view > 0
+            and "Nothing in this session at this threshold."
+            or "Nothing yet.")
         rollWin.hint:Show()
     else
         rollWin.hint:Hide()
@@ -2798,17 +2889,50 @@ end
 -- it. Same setting as the slider in the drop log -- one threshold, two places
 -- to reach it -- so the log follows and vice versa.
 --
+-- Under it, the sessions: which one the list is reading, a new one, and the end
+-- of the lot. Three rows for what used to be one, because "start counting
+-- again" and "throw the night away" were the same button and only one of them
+-- was ever what anybody wanted.
+--
 local rollMenu
 
 local function RollMenuInit(_, level)
     level = level or 1
-    if level ~= 1 then return end
 
     local function Add(fields)
         local info = UIDropDownMenu_CreateInfo()
         for k, v in pairs(fields) do info[k] = v end
         UIDropDownMenu_AddButton(info, level)
     end
+
+    -- The sessions, on a level of their own. Ten of them under the quality
+    -- rows would be a menu you have to read, and this menu is opened to move a
+    -- threshold far more often than to look back at a pull.
+    if level == 2 then
+        if UIDROPDOWNMENU_MENU_VALUE ~= "sessions" then return end
+
+        local function Session(text, index, n)
+            Add({
+                text = text .. ("  |cff808080%d drop%s|r"):format(n, n == 1 and "" or "s"),
+                checked = lootView == index,
+                func = function()
+                    lootView = index
+                    RefreshRollWindow()
+                    CloseDropDownMenus()
+                end,
+            })
+        end
+
+        -- The one being recorded at the top and the rest newest first, because
+        -- the current session is the one you are coming back to.
+        Session("Current", 0, #db.loot.entries)
+        for i, s in ipairs(db.lootPast) do
+            Session(SessionLabel(s), i, #s.entries)
+        end
+        return
+    end
+
+    if level ~= 1 then return end
 
     Add({ text = "Show", isTitle = true, notCheckable = true })
 
@@ -2827,9 +2951,32 @@ local function RollMenuInit(_, level)
     end
 
     Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
+    Add({ text = "Sessions", isTitle = true, notCheckable = true })
+
+    local sess, view = ViewedLoot()
+    Add({
+        -- Named for what it is showing rather than "Sessions" again, so the
+        -- row answers the question as well as leading to it. Nothing filed is
+        -- nothing to choose between, and a flyout with one row in it is worse
+        -- than no flyout at all.
+        text = "Showing: " .. (view > 0 and SessionLabel(sess) or "current"),
+        value = "sessions",
+        hasArrow = true,
+        notCheckable = true,
+        disabled = #db.lootPast == 0,
+    })
+    Add({
+        text = "Start a new session",
+        notCheckable = true,
+        func = function()
+            CloseDropDownMenus()
+            NewLootSession()
+        end,
+    })
     Add({
         -- named for the log rather than for this window, because that is what
-        -- it empties: the drop log both this and the log window read
+        -- it empties: the drop log both this and the log window read, every
+        -- session of it, the filed ones included
         text = "Clear the drop log",
         notCheckable = true,
         func = function()
@@ -2837,6 +2984,8 @@ local function RollMenuInit(_, level)
             ConfirmClearLog()
         end,
     })
+
+    Add({ text = "", isTitle = true, notCheckable = true, disabled = true })
     Add({
         text = "Close this window",
         notCheckable = true,
@@ -2980,9 +3129,12 @@ local function BuildRollWindow()
     title:SetPoint("LEFT", 8, 0)
     title:SetText("Loot")
 
+    -- The hint, and where the session on show is named once it is not the
+    -- current one -- see RefreshRollWindow.
     local hintText = head:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hintText:SetPoint("LEFT", title, "RIGHT", 8, 0)
     hintText:SetText("right-click for options")
+    rollWin.where = hintText
 
     local close = CreateFrame("Button", nil, head, "UIPanelCloseButton")
     close:SetSize(22, 22)
@@ -3707,6 +3859,13 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if type(db.loot) ~= "table" then db.loot = {} end
         db.loot.entries = db.loot.entries or {}
         db.loot.money   = db.loot.money or 0
+
+        -- The sessions filed behind it, which a file written before they
+        -- existed has none of. Trimmed here as well as where they are filed,
+        -- so lowering the cap takes effect rather than waiting for the next
+        -- session to be filed.
+        if type(db.lootPast) ~= "table" then db.lootPast = {} end
+        while #db.lootPast > MAX_LOOT_SESSIONS do table.remove(db.lootPast) end
 
         -- A stack used to be one row per item with a running total and a tally
         -- of who took how many, split back out per winner only when it was
