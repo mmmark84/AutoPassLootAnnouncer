@@ -772,6 +772,8 @@ local pop = {
     MAX_W    = 600,
     ROW_H    = 18,
     PAD      = 5,
+    QTY_MAX  = 34,    -- the same two columns the loot window has, same caps
+    WHO_MAX  = 90,
     MAX_ROWS = 10,    -- rows it can show at once
     MAX_HELD = 20,    -- rows it will hold to be scrolled back through
     offset   = 0,     -- how far back through them the wheel has gone
@@ -1960,6 +1962,21 @@ local function Fill(tex, r, g, b, a)
     end
 end
 
+-- A row is one line tall and its width is whatever the window has been
+-- dragged to, so a name too long for it has to go somewhere. Wrapped, it
+-- becomes a second line the row has no height for: it spills over the row
+-- below and two drops are unreadable instead of one. Cut, the name is short a
+-- word or two and the row above and below it are still exactly where they were
+-- -- and the full name is one hover away on the tooltip, which is where a name
+-- that does not fit belongs. The client draws an ellipsis at the cut.
+--
+-- Guarded like SetColorTexture below: a client old enough not to have it wraps,
+-- which is what every version until now did anyway.
+local function NoWrap(fs)
+    if fs.SetWordWrap then fs:SetWordWrap(false) end
+    return fs
+end
+
 -- A flat block that fills and underlines when it is the one you are on. The
 -- caller paints it rather than the widget doing it itself, because the settings
 -- panel colours its tabs by quality and the loot log does not.
@@ -2824,6 +2841,9 @@ local ROLL = {
     RECENT_H = 16,   -- a line of what already happened
     FOOTER   = 8,
     MAX_ROWS = 8,    -- a raid boss drops five or six at once at most
+    -- The most the count and winner columns may take. They are usually given
+    -- less than this: see ColumnWidth.
+    QTY_MAX = 34, WHO_MAX = 90,
     MIN_W = 260, MIN_H = 120,
     MAX_W = 600, MAX_H = 700,
     ASK_H = 20,      -- the "group changed" prompt, when it is up
@@ -2972,6 +2992,32 @@ local function RecentEntries()
     return rows
 end
 
+-- How wide one of the columns beside the item name needs to be: the widest
+-- thing in it across the rows on show, capped, and handed to every row so they
+-- stay a column. Reserving the cap on every row instead is what left a hand's
+-- width of nothing between a cut-short item name and the winner beside it -- a
+-- night where nothing stacked still paid for a count column, and a group of
+-- six-letter names still paid for a twelve-letter one. The name gets whatever
+-- is left, and the name is the only column here that ever runs short.
+--
+-- Measured across the rows rather than per row on purpose. A column that sat
+-- somewhere different on every line would read worse than the gap it saved.
+local function ColumnWidth(rows, key, max)
+    local wide = 0
+    for _, row in ipairs(rows) do
+        if row:IsShown() and row[key] then
+            wide = math.max(wide, row[key]:GetStringWidth())
+        end
+    end
+    wide = math.min(math.ceil(wide), max)
+    -- Never 0: that is the client's "size yourself to your text", which is the
+    -- one thing a column must not do.
+    for _, row in ipairs(rows) do
+        if row[key] then row[key]:SetWidth(math.max(1, wide)) end
+    end
+    return wide
+end
+
 -- Soonest deadline first, so rows leave from the top and the ones below do not
 -- shuffle upwards under the cursor
 local function SortedPending()
@@ -3020,10 +3066,9 @@ function RefreshRollWindow()
             row.icon:SetTexture(select(10, GetItemInfo(r.p.link)) or UNKNOWN_ICON)
             -- The same "x2" the log rows carry: how many are on offer is part
             -- of what you are answering, and the roll knows it.
-            row.text:SetText(r.p.link
-                and ((r.p.count or 1) > 1
-                     and (r.p.link .. " |cffffffffx" .. r.p.count .. "|r") or r.p.link)
-                or ("roll #" .. r.id))
+            row.text:SetText(r.p.link or ("roll #" .. r.id))
+            row.qty:SetText((r.p.count or 1) > 1
+                and ("|cffffffffx" .. r.p.count .. "|r") or "")
             row.action:SetText("|cffffd100" .. (ACTION_SHORT[r.p.action] or "?") .. "|r")
             row.secs:SetText(("%ds"):format(math.ceil(left)))
 
@@ -3055,8 +3100,8 @@ function RefreshRollWindow()
             row.link, row.res = e.link, e.res
             row.icon:Show()
             row.icon:SetTexture(select(10, GetItemInfo(e.link)) or UNKNOWN_ICON)
-            row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
-                or e.link)
+            row.text:SetText(e.link)
+            row.qty:SetText(e.count > 1 and ("|cffffffffx" .. e.count .. "|r") or "")
             if not e.winner and e.res then
                 row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
@@ -3067,6 +3112,21 @@ function RefreshRollWindow()
             row.link, row.res = nil, nil
             row:Hide()
         end
+    end
+
+    -- The name takes what the columns beside it leave, so it is sized here
+    -- rather than up in the layout: what those columns need is whatever has
+    -- just been put in them. The numbers are the row's own furniture -- its
+    -- inset either side, the icon, and the gaps between the columns.
+    local w = rollWin:GetWidth()
+    local qtyW = ColumnWidth(rollWin.rows, "qty", ROLL.QTY_MAX)
+    for _, row in ipairs(rollWin.rows) do
+        row.text:SetWidth(math.max(40, w - 114 - qtyW))
+    end
+    local logQty = ColumnWidth(rollWin.recent, "qty", ROLL.QTY_MAX)
+    local logWho = ColumnWidth(rollWin.recent, "who", ROLL.WHO_MAX)
+    for _, row in ipairs(rollWin.recent) do
+        row.text:SetWidth(math.max(40, w - 54 - logQty - logWho))
     end
 
     -- a divider only when there is something on both sides of it
@@ -3326,7 +3386,7 @@ local function MakeRollRow(parent, h)
     row.icon:SetSize(h - 5, h - 5)
     row.icon:SetPoint("LEFT", 0, 0)
 
-    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
     row.text:SetPoint("LEFT", h + 1, 0)
     row.text:SetJustifyH("LEFT")
 
@@ -3517,7 +3577,7 @@ local function BuildRollWindow()
         NewLootSession()
     end)
 
-    ask.text = ask:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ask.text = NoWrap(ask:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
     ask.text:SetPoint("LEFT", 5, 0)
     ask.text:SetPoint("RIGHT", askYes, "LEFT", -4, 0)
     ask.text:SetJustifyH("LEFT")
@@ -3559,15 +3619,21 @@ local function BuildRollWindow()
         row.fill:SetPoint("TOPLEFT")
         row.fill:SetPoint("BOTTOMLEFT")
 
-        row.action = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.action = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.action:SetPoint("RIGHT", -30, 0)
         row.action:SetWidth(42)
         row.action:SetJustifyH("RIGHT")
 
-        row.secs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.secs = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.secs:SetPoint("RIGHT", -4, 0)
         row.secs:SetWidth(24)
         row.secs:SetJustifyH("RIGHT")
+
+        -- Out of the name's way, for the reason the log rows below have one.
+        row.qty = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
+        row.qty:SetPoint("RIGHT", row.action, "LEFT", -4, 0)
+        row.qty:SetWidth(28)
+        row.qty:SetJustifyH("RIGHT")
 
         row:SetScript("OnEnter", function(self)
             if not self.rollID then return end
@@ -3601,10 +3667,20 @@ local function BuildRollWindow()
     for i = 1, ROLL.FRAMES do
         local row = MakeRollRow(rollWin, ROLL.RECENT_H)
 
-        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.who:SetPoint("RIGHT", -2, 0)
         row.who:SetWidth(90)
         row.who:SetJustifyH("RIGHT")
+
+        -- The count gets a column of its own on the far side of the name,
+        -- rather than riding on the end of it. With the name cut to fit,
+        -- anything appended to it is the first thing to go -- and how many
+        -- dropped is the one thing on the row you cannot get back off the
+        -- tooltip. The session details window has always listed it this way.
+        row.qty = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
+        row.qty:SetPoint("RIGHT", row.who, "LEFT", -4, 0)
+        row.qty:SetWidth(28)
+        row.qty:SetJustifyH("RIGHT")
 
         row:SetScript("OnEnter", function(self)
             if not self.link then return end
@@ -3682,7 +3758,6 @@ function LayoutRollWindow(npend)
     for i, row in ipairs(rollWin.rows) do
         row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL.ROW_H))
         row:SetPoint("TOPRIGHT", -6, -(y + (i - 1) * ROLL.ROW_H))
-        row.text:SetWidth(math.max(40, w - 110))   -- icon, action, seconds
     end
 
     y = top + npend * ROLL.ROW_H
@@ -3703,7 +3778,6 @@ function LayoutRollWindow(npend)
     for i, row in ipairs(rollWin.recent) do
         row:SetPoint("TOPLEFT", 6, -(y + (i - 1) * ROLL.RECENT_H))
         row:SetPoint("TOPRIGHT", -24, -(y + (i - 1) * ROLL.RECENT_H))   -- clear of the bar
-        row.text:SetWidth(math.max(40, w - 140))
     end
 
     -- Under the prompt when there is one, rather than behind it
@@ -4082,19 +4156,19 @@ function det.build()
         row.icon:SetSize(det.ROW_H - 4, det.ROW_H - 4)
         row.icon:SetPoint("LEFT", 2, 0)
 
-        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.text = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.text:SetPoint("LEFT", det.ROW_H + 2, 0)
         row.text:SetJustifyH("LEFT")
 
-        row.qty = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.qty = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.qty:SetWidth(30)
         row.qty:SetJustifyH("RIGHT")
 
-        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.who:SetWidth(96)
         row.who:SetJustifyH("RIGHT")
 
-        row.at = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.at = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"))
         row.at:SetWidth(40)
         row.at:SetJustifyH("RIGHT")
 
@@ -4161,11 +4235,11 @@ function det.build()
         pr:SetHeight(det.ROW_H)
         pr:EnableMouse(true)
 
-        pr.text = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pr.text = NoWrap(pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         pr.text:SetPoint("LEFT", 2, 0)
         pr.text:SetJustifyH("LEFT")
 
-        pr.won = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pr.won = NoWrap(pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         pr.won:SetPoint("RIGHT", -2, 0)
         pr.won:SetWidth(34)
         pr.won:SetJustifyH("RIGHT")
@@ -4516,10 +4590,20 @@ function pop.build()
         row:EnableMouseWheel(true)
         row:SetScript("OnMouseWheel", pop.wheel)
 
-        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
         row.who:SetPoint("RIGHT", -2, 0)
         row.who:SetWidth(90)
         row.who:SetJustifyH("RIGHT")
+
+        -- The count gets a column of its own on the far side of the name,
+        -- rather than riding on the end of it. With the name cut to fit,
+        -- anything appended to it is the first thing to go -- and how many
+        -- dropped is the one thing on the row you cannot get back off the
+        -- tooltip. The session details window has always listed it this way.
+        row.qty = NoWrap(row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"))
+        row.qty:SetPoint("RIGHT", row.who, "LEFT", -4, 0)
+        row.qty:SetWidth(28)
+        row.qty:SetJustifyH("RIGHT")
 
         row:SetScript("OnEnter", function(self)
             if not self.link then return end
@@ -4600,7 +4684,20 @@ function pop.layout()
     f:SetWidth(w)
     for _, row in ipairs(pop.rows) do
         row:SetWidth(w - pop.PAD * 2)
-        row.text:SetWidth(w - pop.PAD * 2 - pop.ROW_H - 95)
+    end
+    pop.fitColumns()
+end
+
+-- The loot window's answer, on the same two columns: see ColumnWidth. Called
+-- from the redraw, which is where the rows get something in them, and from the
+-- layout above, which is where the window gets a new width.
+function pop.fitColumns()
+    if not pop.frame then return end
+    local w = math.max(pop.MIN_W, math.min(pop.MAX_W, tonumber(db.popupW) or pop.W))
+    local qtyW = ColumnWidth(pop.rows, "qty", pop.QTY_MAX)
+    local whoW = ColumnWidth(pop.rows, "who", pop.WHO_MAX)
+    for _, row in ipairs(pop.rows) do
+        row.text:SetWidth(math.max(40, w - 37 - qtyW - whoW))
     end
 end
 
@@ -4636,8 +4733,8 @@ function pop.refresh()
             row.icon:SetTexture(e.icon
                 or (not e.sample and select(10, GetItemInfo(e.link)))
                 or UNKNOWN_ICON)
-            row.text:SetText(e.count > 1 and (e.link .. " |cffffffffx" .. e.count .. "|r")
-                or e.link)
+            row.text:SetText(e.link)
+            row.qty:SetText(e.count > 1 and ("|cffffffffx" .. e.count .. "|r") or "")
             if not e.winner and e.res then
                 row.who:SetText("|cff9d7fd0" .. ShortReserve(e.res) .. "|r")
             else
@@ -4650,6 +4747,7 @@ function pop.refresh()
         end
     end
 
+    pop.fitColumns()
     pop.frame:SetHeight(shown * pop.ROW_H + pop.PAD * 2)
 end
 

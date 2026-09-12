@@ -171,13 +171,24 @@ Off by default. **Loot window** at the bottom of the options panel cycles throug
 │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░│
 │▓[Pattern: Swiftheal Mantle]▓▓▓▓▓▓▓▓ Pass   3s░│   ← green, draining left
 │▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
-│▓[Heart of Darkness] x2░░░░░░░░░░░░░ Pass   1s░│   ← red, nearly out
+│▓[Heart of Darkness]░░░░░░░░░░░ x2   Pass   1s░│   ← red, nearly out
 ├───────────────────────────────────────────────┤
-│ Heart of Darkness x3 ................ Aereora │
-│ Heart of Darkness x2                          │
-│ Mark of the Illidari x12 ............ Perhorn │
-│ Bloodfist Helmet ..................... Isaari │
+│ Heart of Darkness ............. x3    Aereora │
+│ Heart of Darkness ............. x2            │
+│ Mark of the Illidari .......... x12   Perhorn │
+│ Bloodfist Helmet .................... Isaari  │
 └──────────────────────────────────────────────◢┘
+
+**A row is always one line.** Drag the window narrower than a name and the name
+is cut rather than wrapped — a second line is a line the row has no height for,
+and it lands on top of the drop below it. The whole name is on the tooltip. The
+same goes for the drop popup and the session details list.
+
+How many dropped sits in a column of its own, out of the cut's way, because it
+is the one thing on a row you cannot get back by hovering it. That column and
+the winner column are each only as wide as the widest thing on show, so a night
+where nothing stacked has no count column at all and the name gets the room
+instead.
 ```
 
 Above the line are pending rolls. **The countdown is the row itself**: a band the full width of it, draining away leftwards behind the item name, so how long is left reads from the corner of your eye without the number being read. It warms from green through amber to red as it goes. The seconds are there beside it for when you want the exact figure.

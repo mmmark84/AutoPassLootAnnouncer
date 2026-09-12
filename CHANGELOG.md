@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.12.1] - 2026-09-12
+
+### Fixed
+- An item name too long for the window **wrapped onto a second line**, which
+  the row has no height for: it drew over the drop below it and cost you two
+  rows to say one thing, worst on exactly the narrow window that was meant to
+  stay out of the way. Names are cut to the width now, with the client's
+  ellipsis at the cut, and the row below is where it always was. Nothing is
+  lost -- the full name is on the tooltip, which is where a name that does not
+  fit belongs. The loot window, the drop popup and the session details list all
+  do it, and so do the winner, reserve and countdown columns beside them.
+
+### Changed
+- **How many dropped has a column of its own** on the loot window and the
+  popup, between the name and the winner, where the session details window has
+  always kept it. It used to ride on the end of the name, and anything on the
+  end of a name is the first thing a cut takes -- losing the `x5` off a stack
+  of five, which unlike the name is not on the tooltip either.
+- **The columns are only as wide as what is in them.** The count column and the
+  winner column each take the widest thing on show, capped, and the item name
+  gets everything they leave. Reserving the cap on every row instead is what put
+  a hand's width of nothing between a cut-short name and the winner beside it:
+  a night where nothing stacked still paid for a count column, and a group of
+  six-letter names still paid for a twelve-letter one. Measured across the rows
+  rather than per row, so they are still columns -- one that sat somewhere
+  different on every line would read worse than the gap it saved.
+
 ## [1.12.0] - 2026-09-12
 
 ### Changed
