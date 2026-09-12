@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.12.2] - 2026-09-12
+
+### Fixed
+- A window opened for the first time **during a fight could not be closed with
+  its X** until the fight ended. Worst on the session details window, which is
+  reached from the loot window's right-click menu and so is most likely to be
+  opened mid-pull for the first time -- it appeared, it read fine, and its X
+  did nothing while you were in combat. The X on a window built from one of
+  Blizzard's frame templates runs the template's own handler, which goes
+  through the panel manager, and the panel manager will not act on a frame an
+  addon put on screen while the client was in combat. Hiding one of this
+  addon's own windows is not the panel manager's business, so the button is
+  pointed straight at it now. The loot window's X was wired that way from the
+  start, which is why that one always closed in a fight; the settings panel,
+  the share-code window, the login prompt and the session details window have
+  caught it up. Escape closed all of them all along, and still does.
+
 ## [1.12.1] - 2026-09-12
 
 ### Fixed

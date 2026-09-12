@@ -1731,6 +1731,23 @@ local function ChannelSummary()
     return "|cff00ff00" .. ch:lower() .. "|r (up to " .. cap .. ")"
 end
 
+-- The X on a window built from one of Blizzard's frame templates. Left as the
+-- template wires it, it runs HideParentPanel, which is the panel manager's way
+-- in -- and the panel manager will not act on a frame an addon put on screen
+-- while the client was in combat. Open the session details for the first time
+-- mid-fight, off the loot window's menu, and its X then does nothing at all
+-- until the fight ends. The window is fine; the route to closing it is not.
+--
+-- Hiding our own window is our business and none of the panel manager's, so the
+-- button goes straight at it. The loot window's X has been wired this way since
+-- it was built, which is why that one has always closed in a fight; this is the
+-- four windows on a template catching it up.
+local function CloseButtonHides(frame)
+    local name = frame:GetName()
+    local x = frame.CloseButton or (name and _G[name .. "CloseButton"])
+    if x then x:SetScript("OnClick", function() frame:Hide() end) end
+end
+
 ----------------------------------------------------------------
 -- Login prompt
 ----------------------------------------------------------------
@@ -1785,6 +1802,7 @@ local function BuildArmPrompt()
     -- Escape closes it, which means "leave it off": the prompt exists so that
     -- arming is never something that happened without you saying so.
     tinsert(UISpecialFrames, "AutoPassLootAnnouncerArmPrompt")
+    CloseButtonHides(armPrompt)
 
     local title = armPrompt:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOP", 0, -6)
@@ -2221,6 +2239,7 @@ local function BuildPresetCode()
     presetCode:SetToplevel(true)
     presetCode:Hide()
     tinsert(UISpecialFrames, "AutoPassLootAnnouncerPresetCode")   -- Escape closes it
+    CloseButtonHides(presetCode)
 
     local title = presetCode:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOP", 0, -6)
@@ -2320,6 +2339,7 @@ local function BuildPanel()
     panel:SetToplevel(true)
     panel:Hide()
     tinsert(UISpecialFrames, "AutoPassLootAnnouncerPanel")   -- Escape closes it
+    CloseButtonHides(panel)
 
     -- Centred on the title text rather than hung off the top edge, and small
     -- enough to sit inside the title bar: at 26 it hung far enough below the
@@ -3978,6 +3998,7 @@ function det.build()
     f:SetToplevel(true)
     f:Hide()
     tinsert(UISpecialFrames, "AutoPassLootAnnouncerDetails")   -- Escape closes it
+    CloseButtonHides(f)
 
     if f.SetResizeBounds then
         f:SetResizeBounds(det.MIN_W, det.MIN_H, det.MAX_W, det.MAX_H)
