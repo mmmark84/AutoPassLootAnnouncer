@@ -14,7 +14,8 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 - **One line per item**, to your choice of channel
 - **Roll actions per quality and per kind** — need, greed, pass, or leave the window up, set separately for BoP, BoE and stackable BoE drops, so the epic gems pass themselves while a BoE pattern off the same boss stops and waits for you
 - **Single announcer election** — when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure
-- **Never armed between sessions** — automated rolling starts each login off, on, or behind a prompt, whichever you pick
+- **One switch for the lot** — armed, it does what the preset says; disarmed, it rolls nothing and says nothing, so putting it away for a night is one click
+- **Never armed between sessions** — it starts each login off, on, or behind a prompt, whichever you pick
 - **A drop popup** that appears when something drops, says what it was and goes again — the pack's haul read in the quiet after the pull, never on screen during one
 - **Say it with** a prefix of your own, a random cheerful pepe, or a random silly line off a list of fifty
 
@@ -26,9 +27,11 @@ Built for raids where everyone is asked to pass on loot. Blizzard's "Pass on Loo
 
 ## Usage
 
-Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click turns the loot window on and off.
+Left-click the minimap button to arm or disarm. Right-click opens the options, middle-click turns the loot window on and off.
 
-Armed is never carried between sessions. What happens at login is the **At login** button beside the "Roll automatically" checkbox — click it to cycle:
+**Armed is the master switch.** Disarmed, the addon rolls nothing and announces nothing, whatever the preset holds — the loot window, the popup and the drop log still show you what fell, because those are yours to read rather than something the group hears. Armed, it does what the preset says, which can be announcing and no rolling at all.
+
+Armed is never carried between sessions. What happens at login is the **At login** button beside the "Arm this session" checkbox — click it to cycle:
 
 | | |
 | --- | --- |
@@ -42,7 +45,7 @@ Armed is never carried between sessions. What happens at login is the **At login
 
 | | |
 | --- | --- |
-| <img src="Media/icon-idle.png" width="48"> | Idle, automated rolling off |
+| <img src="Media/icon-idle.png" width="48"> | Disarmed, nothing rolled and nothing announced |
 | <img src="Media/icon-armed.png" width="48"> | Armed, the arrows turn green |
 
 For the addon to see rolls at all, Blizzard's own **Pass on Loot** option must be **off** (Interface → Combat). That option suppresses the roll server side and no addon can work around it.
@@ -70,6 +73,8 @@ There is no Save button, deliberately. The live settings **are** the active pres
 
 The second list is the things that belong to the account rather than to a role you switch into — a preset that moved your minimap button would be moving the control you switch presets with. Armed is not in a preset either; it is never remembered between sessions at all.
 
+**Announce is in a preset and armed is not**, and the two read together: arming says whether the addon is doing anything tonight, the preset says what. So one preset can announce and leave every roll alone — an announcer and nothing else — while another passes on the lot in silence, and disarming stops either of them dead.
+
 #### Share codes
 
 **Share code...** in the preset menu opens a window holding the active preset as one line. Ctrl+A then Ctrl+C copies it. Paste someone else's in instead and **Import as new preset** adds it alongside the ones you have and switches to it — it never writes over a preset you already had.
@@ -96,7 +101,7 @@ A code pasted straight after `/apla preset`, with no keyword, is recognised as o
 | --- | --- |
 | `APLA1` | The format version |
 | `n` | Name |
-| `a` | Announce to chat, 0 or 1 |
+| `a` | Announce to chat, 0 or 1. Only ever speaks while armed |
 | `c` | Channel cap, 1 say to 4 yell |
 | `q` | Announce threshold, 0 to 5 |
 | `sm` | What it says a drop with: `prefix`, `pepe` or `random` |
@@ -399,7 +404,9 @@ It shares the **Show** threshold with the loot window: one answer to "what is wo
 
 ### Announcing
 
-Two settings: **Announce** sets the minimum quality, **Announce up to** sets the widest channel. The channel is a cap that steps down to whatever is available:
+**Nothing is announced while disarmed.** Announce is part of a preset, the way the roll grid is, and both wait on the same switch — so the settings panel dims the announce block when you are not armed: still yours to set, because it is the preset you are building, but not saying anything right now.
+
+Three settings: **Announce to chat** turns it on, **Announce** sets the minimum quality, **Announce up to** sets the widest channel. With **Announce to chat** off, a drop still prints to your own chat frame and nothing goes to the group. The channel is a cap that steps down to whatever is available:
 
 | Cap | In raid | In party | Solo |
 | --- | --- | --- | --- |
@@ -450,7 +457,7 @@ line rarely lands twice in a row.
 | Command | Effect |
 | --- | --- |
 | `/apla` | Open the options panel (`/lap` also works) |
-| `/apla pass` | Arm or disarm automated rolling |
+| `/apla arm` | Arm or disarm the addon (`/apla pass` is the old name and still works) |
 | `/apla preset` | List the presets |
 | `/apla preset <name or number>` | Switch to one |
 | `/apla preset new <name>` | New preset, copied from the current settings |
@@ -461,7 +468,7 @@ line rarely lands twice in a row.
 | `/apla set <bop\|boe\|stack\|all> <2-5> <window\|pass\|greed\|need>` | Set the action for one quality and kind |
 | `/apla channel <say\|party\|raid\|yell>` | Set the announce channel cap |
 | `/apla quality <0-5>` | Minimum quality to announce |
-| `/apla announce` | Toggle chat output (off prints locally) |
+| `/apla announce` | Toggle chat output (off prints locally; either way it waits on armed) |
 | `/apla login <off\|on\|ask>` | What automated rolling does at login |
 | `/apla grace <0-60>` | Seconds to hold a roll before answering it; 0 answers straight away |
 | `/apla window` | Open or close the loot window (`/apla roll` also works) |

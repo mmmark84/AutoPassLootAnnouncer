@@ -25,7 +25,8 @@
   <li><strong>Sessions</strong> &mdash; split the log per boss or per pull the way a damage meter splits segments, with the last ten kept to switch back to</li>
   <li><strong>Presets</strong> for whole sets of settings, so the night's raid rules and the way you loot a five-man are two clicks apart, with a one-line code to share either</li>
   <li><strong>Single announcer election</strong> &mdash; when several people in the group run the addon, they agree on one announcer so the drop is posted once, with nothing to configure</li>
-  <li><strong>Never armed between sessions</strong> &mdash; automated rolling starts each login off, on, or behind a prompt, whichever you pick</li>
+  <li><strong>One switch for the lot</strong> &mdash; armed, it does what the preset says; disarmed, it rolls nothing and says nothing, so putting it away for a night is one click</li>
+  <li><strong>Never armed between sessions</strong> &mdash; it starts each login off, on, or behind a prompt, whichever you pick</li>
   <li><strong>A drop popup</strong> that appears when something drops, says what it was and goes again &mdash; the pack's haul read in the quiet after the pull, never on screen during one</li>
   <li><strong>Say it with</strong> a prefix of your own, a random cheerful pepe, or a random silly line off a list of fifty</li>
 </ul>
@@ -134,7 +135,9 @@
 
 <h3>Arming</h3>
 
-<p>Left-click the minimap button to arm or disarm automated rolling. Right-click opens the options, middle-click turns the loot window on and off.</p>
+<p>Left-click the minimap button to arm or disarm. Right-click opens the options, middle-click turns the loot window on and off.</p>
+
+<p><strong>Armed is the master switch.</strong> Disarmed, the addon rolls nothing and announces nothing, whatever the preset holds &mdash; the loot window, the popup and the drop log still show you what fell, because those are yours to read rather than something the group hears. Armed, it does what the preset says, which can be announcing and no rolling at all.</p>
 
 <p>Armed is never carried between sessions. The <strong>At login</strong> button decides what happens next time: <strong>Off</strong> stays disarmed until you arm it yourself, <strong>On</strong> arms straight away on the preset you were last using, and <strong>Ask</strong> puts a prompt in front of it so it is never armed without you saying so. The prompt carries a preset dropdown, so it is also where you pick the night's role.</p>
 
@@ -143,6 +146,8 @@
 <h3>Presets</h3>
 
 <p>A preset is the whole roll table plus everything about announcing and both windows, under a name. The raid's "pass on everything" rules and the way you loot a five-man are two clicks apart, and the login prompt on <strong>Ask</strong> is where you pick which one the night runs on.</p>
+
+<p>Announcing is one of the things a preset holds, and arming is not, which is what lets the two be asked separately: one preset can announce and leave every roll alone &mdash; an announcer and nothing else &mdash; while another passes on the lot in silence, and disarming stops either of them dead.</p>
 
 <p><strong>Share codes</strong> put a preset on one line of text. <code>/apla preset code</code> opens a box to copy yours out of or paste somebody else's into, so a raid leader can hand the night's rules to twenty-four people in one message and they arrive as a new preset rather than overwriting anything.</p>
 

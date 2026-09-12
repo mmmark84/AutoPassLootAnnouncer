@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.12.0] - 2026-09-12
+
+### Changed
+- **Announcing waits on being armed.** It is still part of a preset, and it is
+  now silent until you arm, the way the roll grid always has been. The setting
+  on its own meant the addon talked in every group you walked into, whether or
+  not you had asked it to do anything that night, and the only way to shut it
+  up was to go into the settings and untick it -- then remember to tick it back
+  before the raid. Arming is one click and it is already the switch you reach
+  for.
+  What that buys, beyond quiet: the two questions are separable again. A preset
+  can announce and leave every roll alone -- an announcer and nothing else --
+  because what it holds and whether it is running are now different questions.
+  Disarmed, nothing is rolled and nothing is said, not even to your own chat
+  frame. The loot window, the drop popup and the drop log still show you what
+  fell: those are yours to read rather than something the group hears.
+- The **announcer election** reads the same answer. A disarmed copy is no
+  longer willing, so it can never be elected the one that speaks and leave the
+  group waiting on it in silence; arming and disarming re-send the hello there
+  and then, rather than the group running on a picture of you that is up to
+  four minutes old.
+- **Roll automatically** on the settings panel is now **Arm this session**,
+  because it no longer only decides rolling. Everything from the announce
+  checkbox down dims while you are disarmed -- still yours to set, since it is
+  the preset you are building, but not saying anything right now. The minimap
+  tooltip reads `Armed: no - nothing rolled, nothing said`, and with announcing
+  ticked but disarmed, `Announcing to: not while disarmed` rather than `off`
+  next to a ticked box.
+- `/apla arm` is the new name for `/apla pass`, which still works.
+
 ## [1.11.1] - 2026-09-11
 
 ### Fixed

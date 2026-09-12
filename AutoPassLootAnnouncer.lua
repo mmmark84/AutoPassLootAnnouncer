@@ -7,11 +7,15 @@ local ADDON_NAME = ...
      option to be OFF. It is the only way to learn about a drop the instant it drops,
      and it reports the kill whoever ends up opening the corpse.
 
+     Nothing is said until you arm it. Arming is the one switch that turns the
+     addon on for a session; the preset then says what being on means, which can
+     be announcing and no rolling at all.
+
      Auto-pass is never remembered between sessions. What happens at login is
      the "At login" setting: off, armed straight away, or a prompt each time.
 
-     Minimap button:  left click = arm/disarm auto-pass, right click = settings, drag = move
-                      green P = armed, silver P = normal rolls
+     Minimap button:  left click = arm/disarm, right click = settings, drag = move
+                      green P = armed, silver P = the addon standing down
      /apla       open the settings panel (/lap still works)
 ]]
 
@@ -19,8 +23,10 @@ local ADDON_NAME = ...
 -- Config (saved per account in AutoPassLootAnnouncerDB)
 ----------------------------------------------------------------
 local defaults = {
-    autopass     = false,  -- master switch for automated rolling; forced off at every login
-    announce     = true,   -- false = print to your own chat frame only
+    autopass     = false,  -- armed: the master switch for rolling and for announcing
+                           -- alike; forced off at every login
+    announce     = true,   -- false = print to your own chat frame only. Either way
+                           -- nothing is said at all while disarmed.
     channel      = 3,      -- widest channel to use: 1 say, 2 party, 3 raid, 4 yell
     minQuality   = 3,      -- announce threshold: 2=green 3=blue 4=epic
     -- actionsBoP[quality] and actionsBoE[quality] = -1 leave / 0 pass / 1 need /
@@ -56,6 +62,11 @@ local defaults = {
 -- whether the minimap button is shown, the drop log itself, the debug flag --
 -- and not `autopass` either, which is forced off at every login and so is
 -- never a stored setting in the first place.
+--
+-- `announce` being in here while `autopass` is not is the whole shape of it:
+-- arming says whether the addon is doing anything tonight, and the preset says
+-- what. A preset that announces and leaves every roll alone is an announcer and
+-- nothing else, and one click still puts the lot away.
 local PRESET_KEYS = {
     "announce", "channel", "minQuality", "prefix", "sayMode", "hud", "grace", "popup",
     "trackMin", "actionsBoP", "actionsBoE", "actionsBoEStack",
@@ -826,6 +837,15 @@ local function InstanceGroup()
         and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) == true
 end
 
+-- Whether this copy would put a drop in the group's chat: armed, and set to
+-- announce. It takes both, and that is the point -- the setting on its own
+-- meant the addon talked in every group you walked into, whether or not you had
+-- asked it to do anything that night. The election reads this rather than the
+-- setting, so a disarmed copy is never elected the one that speaks.
+local function Announcing()
+    return (db.autopass and db.announce) and true or false
+end
+
 local function ResolveChannel()
     if not db.announce then return nil end
     local cap = db.channel or 3
@@ -953,7 +973,11 @@ local function ProcessRoll(rollID, tries)
     Dbg("roll %d: link=%s quality=%s bop=%s stack=%s tries=%d", rollID, tostring(link),
         tostring(quality), tostring(bop), tostring(stackable), tries)
 
-    if link and (quality or 99) >= db.minQuality then
+    -- Disarmed the addon has no voice: nothing to the group, and nothing to
+    -- your own chat frame either. The drop is still logged just below, and the
+    -- loot window and the popup still show it -- those are yours to read rather
+    -- than something the group hears.
+    if db.autopass and link and (quality or 99) >= db.minQuality then
         Queue(link)
     end
 
@@ -1031,9 +1055,10 @@ function SendHello(force)
     local now = GetTime()
     if not force and (now - lastHello) < 3 then return end
     lastHello = now
-    -- willing: this copy would announce at all. The second field is the old
-    -- opt-out flag, still sent as 1 so copies on older versions can read us.
-    Comm(("H:%s:1"):format(db.announce and 1 or 0))
+    -- willing: this copy would announce at all -- armed and set to announce.
+    -- The second field is the old opt-out flag, still sent as 1 so copies on
+    -- older versions can read us.
+    Comm(("H:%s:1"):format(Announcing() and 1 or 0))
 end
 
 -- Sent when we think our picture of the group has gone stale. Copies on older
@@ -1049,7 +1074,7 @@ end
 -- Everyone runs the same election over the same roster, so no negotiation is
 -- needed per drop: lowest name alphabetically among the willing copies wins.
 function Announcer()
-    local best = db.announce and Me() or nil
+    local best = Announcing() and Me() or nil
     local now = GetTime()
     for name, info in pairs(peers) do
         if info.willing and (now - info.seen) < PEER_TIMEOUT then
@@ -1677,6 +1702,16 @@ local function UpdateButtonLook()
     if panel  and panel.icon  then panel.icon:SetTexture(tex) end
 end
 
+-- Everything that has to happen when arming changes. The hello is the reason
+-- this exists: arming decides whether this copy announces, so the group's
+-- election is out of date the moment you flip it, and a copy that is no longer
+-- willing has to say so or the group waits on it in silence.
+local function ArmedChanged()
+    UpdateButtonLook()
+    SendHello(true)
+    if panel and panel:IsShown() then RefreshPanel() end
+end
+
 local function UpdateButtonPos()
     local a = math.rad(db.minimapAngle)
     button:SetPoint("CENTER", Minimap, "CENTER", 80 * math.cos(a), 80 * math.sin(a))
@@ -1684,6 +1719,10 @@ end
 
 local function ChannelSummary()
     if not db.announce then return "|cffff0000off|r" end
+    -- Set to announce but disarmed. Worth saying in as many words: reading
+    -- "off" next to a setting that is switched on is how you end up thinking
+    -- the setting is broken.
+    if not db.autopass then return "|cffff8800not while disarmed|r" end
     local ch = ResolveChannel()
     local cap = CHANNEL_NAME[db.channel or 3]:lower()
     if not ch then return "|cffffff00self only|r (up to " .. cap .. ")" end
@@ -1753,8 +1792,10 @@ local function BuildArmPrompt()
     msg:SetPoint("TOPLEFT", 20, -38)
     msg:SetPoint("TOPRIGHT", -20, -38)
     msg:SetJustifyH("CENTER")
-    msg:SetText("Arm automated rolling for this session?\n\n"
-        .. "While armed it answers loot rolls for you, by quality and bind type.")
+    msg:SetText("Arm the addon for this session?\n\n"
+        .. "While armed it answers loot rolls for you, by quality and bind type, "
+        .. "and announces what drops if the preset you pick says to. Disarmed it "
+        .. "does neither.")
 
     -- The row and the buttons are anchored up from the bottom edge, so however
     -- many lines the message above wraps to, nothing below it moves.
@@ -1776,10 +1817,9 @@ local function BuildArmPrompt()
     arm:SetScript("OnClick", function()
         armPrompt:Hide()
         db.autopass = true
-        UpdateButtonLook()
-        print(("|cff66ccffAPLA|r auto-roll |cff00ff00armed|r on |cffffd100%s|r")
+        ArmedChanged()
+        print(("|cff66ccffAPLA|r |cff00ff00armed|r on |cffffd100%s|r")
             :format(ActivePresetName()))
-        if panel and panel:IsShown() then RefreshPanel() end
     end)
 
     local leave = CreateFrame("Button", nil, armPrompt, "UIPanelButtonTemplate")
@@ -1805,7 +1845,7 @@ local function ButtonTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("Auto Pass Loot Announcer")
     GameTooltip:AddDoubleLine("Preset", "|cffffd100" .. ActivePresetName() .. "|r")
-    GameTooltip:AddDoubleLine("Auto-roll", db.autopass and "|cff00ff00ARMED|r" or "|cffff0000off|r")
+    GameTooltip:AddDoubleLine("Armed", db.autopass and "|cff00ff00YES|r" or "|cffff0000no|r - nothing rolled, nothing said")
     if db.autopass then
         GameTooltip:AddLine(ActionSummary(), 1, 1, 1, true)
     end
@@ -1815,7 +1855,7 @@ local function ButtonTooltip(self)
         GameTooltip:AddDoubleLine("Announcer", (a == Me()) and "|cff00ff00you|r" or ("|cffffff00" .. tostring(a) .. "|r"))
     end
     GameTooltip:AddLine(" ")
-    GameTooltip:AddLine("|cffeda55fLeft click|r arm/disarm auto-pass", 1, 1, 1)
+    GameTooltip:AddLine("|cffeda55fLeft click|r arm/disarm", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fRight click|r settings", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fMiddle click|r loot window", 1, 1, 1)
     GameTooltip:AddLine("|cffeda55fDrag|r move", 1, 1, 1)
@@ -1824,9 +1864,9 @@ end
 
 local function ToggleAutopass()
     db.autopass = not db.autopass
-    UpdateButtonLook()
-    if panel and panel:IsShown() then RefreshPanel() end
-    print("|cff66ccffAPLA|r auto-pass: " .. (db.autopass and "|cff00ff00ARMED|r" or "|cffff0000off|r"))
+    ArmedChanged()
+    print("|cff66ccffAPLA|r " .. (db.autopass and "|cff00ff00ARMED|r"
+        or "|cffff0000off|r - nothing rolled, nothing announced"))
 end
 
 local function BuildButton()
@@ -2303,11 +2343,13 @@ local function BuildPanel()
             if v then button:Show() else button:Hide() end
         end)
 
-    panel.pass = MakeCheck(body, "APLACheckPass", "Roll automatically", 16, -60,
-        "Master switch for the grid below. With everything set to Pass it just passes on the lot, "
-            .. "the same net effect as Blizzard's Pass on Loot checkbox. Never carried between "
-            .. "sessions; the button beside this one decides what happens at login.",
-        function(v) db.autopass = v; UpdateButtonLook() end)
+    panel.pass = MakeCheck(body, "APLACheckPass", "Arm this session", 16, -60,
+        "The master switch. Off, the addon rolls nothing and says nothing, whatever the preset "
+            .. "holds. On, it does what the preset says: the grid below, and announcing if that "
+            .. "is ticked. With the grid all set to Pass it just passes on the lot, the same net "
+            .. "effect as Blizzard's Pass on Loot checkbox. Never carried between sessions; the "
+            .. "button beside this one decides what happens at login.",
+        function(v) db.autopass = v; ArmedChanged() end)
 
     -- Sits on the checkbox's own line rather than a row of its own, which keeps
     -- it next to the thing it qualifies and leaves everything below where it is.
@@ -2319,7 +2361,7 @@ local function BuildPanel()
         RefreshPanel()
     end)
     AttachTooltip(panel.loginArm, "At login", {
-        "What automated rolling does when you log in or reload. Click to cycle.",
+        "Whether the addon arms itself when you log in or reload. Click to cycle.",
         "|cffffd100Off|r - stays disarmed until you arm it yourself.",
         "|cffffd100On|r - armed straight away.",
         "|cffffd100Ask|r - a prompt each time, so it is never on without you saying so.",
@@ -2527,8 +2569,10 @@ local function BuildPanel()
     })
 
     panel.announce = MakeCheck(body, "APLACheckAnnounce", "Announce to chat", 16, 0,
-        "Off = print to your own chat frame only, nothing is sent to the group.",
-        function(v) db.announce = v; SendHello(true) end)
+        "Off = print to your own chat frame only, nothing is sent to the group. Either way it "
+            .. "waits on Arm this session: it is part of the preset and silent until you arm. So "
+            .. "a preset can announce and roll nothing, and disarming stops the lot.",
+        function(v) db.announce = v; SendHello(true); RefreshPanel() end)
     panel.announce:ClearAllPoints()
     panel.announce:SetPoint("TOPLEFT", panel.popup, "BOTTOMLEFT", 0, -16)
 
@@ -2614,10 +2658,19 @@ function RefreshPanel()
     panel.SelectQuality(panel.quality or 4)
     panel.edit:SetText(db.prefix)
     panel.sayMode:SetText(SAY_MODE_LABEL[db.sayMode] or SAY_MODE_LABEL.prefix)
-    -- The prefix box is still yours to edit in the other two modes -- it is
-    -- what you go back to -- but dimmed, because nothing is being announced
-    -- with it right now.
-    local usingPrefix = (db.sayMode == "prefix")
+    -- Everything from the announce checkbox down is dimmed while disarmed:
+    -- still yours to set, because it is the preset you are building, but not
+    -- saying anything right now. The prefix box dims for a second reason of its
+    -- own -- it is what you go back to in the two modes that do not read it --
+    -- and one level of dim covers both, the answer either way being the same:
+    -- set, not in use.
+    local live = db.autopass and 1 or 0.4
+    panel.announce:SetAlpha(live)
+    panel.chSlider:SetAlpha(live)
+    panel.slider:SetAlpha(live)
+    panel.sayMode:SetAlpha(live)
+    panel.sayLabel:SetAlpha(live)
+    local usingPrefix = (db.sayMode == "prefix") and db.autopass
     panel.prefixLabel:SetAlpha(usingPrefix and 1 or 0.4)
     panel.edit:SetAlpha(usingPrefix and 1 or 0.4)
     UpdateButtonLook()
@@ -5003,11 +5056,11 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
         if db.loginArm == "on" then
             db.autopass = true
-            UpdateButtonLook()
+            ArmedChanged()
         end
 
-        print("|cff66ccffAutoPassLootAnnouncer|r loaded. Auto-roll "
-            .. (db.autopass and "|cff00ff00armed|r" or "|cffff0000off|r")
+        print("|cff66ccffAutoPassLootAnnouncer|r loaded. "
+            .. (db.autopass and "|cff00ff00Armed|r" or "|cffff0000Disarmed|r - nothing rolled, nothing announced")
             .. " - left-click the minimap button to change it.")
 
         if db.loginArm == "ask" then
@@ -5102,14 +5155,17 @@ SlashCmdList.AUTOPASSLOOTANNOUNCER = function(msg)
     -- The same argument with its case intact. Everything that was already here
     -- wants it folded; preset names and share codes do not.
     local raw = msg:match("^%s*%S*%s*(.-)%s*$")
-    if cmd == "pass" then
+    if cmd == "pass" or cmd == "arm" then
         ToggleAutopass()
         return
     elseif cmd == "preset" then
         PresetCommand(raw)
     elseif cmd == "announce" then
         db.announce = not db.announce
-        print("|cff66ccffAPLA|r chat announce: " .. tostring(db.announce))
+        SendHello(true)   -- willingness changed; the group elects again
+        print("|cff66ccffAPLA|r chat announce: " .. tostring(db.announce)
+            .. ((db.announce and not db.autopass)
+                and " |cffff8800(nothing until you arm it)|r" or ""))
     elseif cmd == "channel" then
         local n = { say = 1, party = 2, raid = 3, yell = 4 }
         if n[val] then
