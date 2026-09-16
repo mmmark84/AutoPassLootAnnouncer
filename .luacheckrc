@@ -25,6 +25,9 @@ globals = {
     "AutoPassLootAnnouncerPresetCode",
     "AutoPassLootAnnouncerArmPrompt",
     "AutoPassLootAnnouncerRollWindow",
+    -- the off-screen tooltip a drop's Unique line is read from. Named because
+    -- a tooltip's lines are only reachable as <name>TextLeft<n> globals.
+    "AutoPassLootAnnouncerScan",
     "SlashCmdList",       -- the addon writes its handler into this table
     "StaticPopupDialogs", -- and its login prompt into this one
 }
@@ -37,6 +40,12 @@ read_globals = {
     "COPPER_AMOUNT", "GOLD_AMOUNT", "SILVER_AMOUNT", "LOOT_ITEM", "LOOT_ITEM_MULTIPLE",
     "LOOT_ITEM_SELF", "LOOT_ITEM_SELF_MULTIPLE", "date",
     "GameTooltip", "GetCursorPosition", "GetItemInfo", "GetLootRollItemInfo",
+    -- how many of an item we hold, which is half of why the server left us out
+    -- of a roll; the worn slots are the half GetItemCount does not count
+    "GetItemCount", "GetInventoryItemID",
+    -- and what the other half looks like on this client, guarded because not
+    -- every client has all three
+    "ITEM_UNIQUE", "ITEM_UNIQUE_EQUIPPABLE", "ITEM_UNIQUE_MULTIPLE",
     "GetLootRollItemLink", "GetLootRollTimeLeft", "GetNumGroupMembers", "GetTime",
     "ITEM_QUALITY_COLORS", "IsInGroup", "IsInRaid", "Minimap",
     -- the class a group member is, and the colour for it, so a name can be

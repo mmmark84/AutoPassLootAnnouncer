@@ -759,7 +759,7 @@ end
 local pending, flushScheduled = {}, false
 local Dbg, IsAnnouncer, Announcer, SendHello, Comm   -- defined further down
 local SayList
-local LogDrop, LogAnnounced, LogMoney, ClearLog, LogRollLine
+local LogDrop, LogAnnounced, LogMoney, ClearLog, LeftOutOfRoll
 local AddPendingRoll, CancelPendingRoll, RefreshRollWindow, CloseRollWindow
 
 -- The drop popup. Everything it owns hangs off this one table: the drop log
@@ -1144,15 +1144,14 @@ end
 -- through the loot system. None of it was ever offered to anyone, and it buried
 -- the drops that were.
 --
--- So being rolled for is what makes an item loggable, and the loot message only
+-- So START_LOOT_ROLL is what makes an item loggable, and the loot message only
 -- says who ended up with it. The roll fires before anyone has won, so a drop
 -- gets its row there and waits for a name -- one that never gets a name is a
 -- drop nobody took.
 --
--- START_LOOT_ROLL is where that usually comes from, but it only fires for a
--- roll we are in, and there is one drop we never are: a unique item already in
--- our own bags, which the server does not offer us at all. The group's roll
--- lines cover that one -- see LogRollLine.
+-- There is one drop the server never offers us a roll on, and so one drop that
+-- reaches us as a loot message and nothing else: a unique item already in our
+-- own bags. That one is let in on evidence of its own -- see LeftOutOfRoll.
 --
 -- A stack is no different, because the roll says how many dropped as well as
 -- what did. It used to wait for the loot message on the grounds that nothing
@@ -1241,11 +1240,6 @@ local function LootForms()
     end
     return lootForms
 end
-
--- An item as the client writes one into chat, colour code and all. Shared by
--- the roll lines below and by the announcements further down, both of which
--- have to pick a link out of a sentence rather than be handed one.
-local ITEM_LINK = "|c%x+|Hitem:.-|h.-|h|r"
 
 local function ParseLoot(msg)
     for _, form in ipairs(LootForms()) do
@@ -1387,6 +1381,111 @@ function roster.log()
     return at
 end
 
+-- The one drop that reaches us with nothing behind it.
+--
+-- A unique item already in our own bags is not offered to us at all: the server
+-- leaves us out of the roll for it, so there is no roll window, no
+-- START_LOOT_ROLL, and -- because a roll's progress is only sent to the players
+-- in it -- not a word of the rolling in the loot channel either. The whole of
+-- the evidence is one "receives loot" line naming somebody else, which is
+-- exactly the line the log refuses to trust on its own.
+--
+-- What makes this one safe to let through is that the reason we were left out
+-- is a reason we can check for ourselves. We hold the item, and it says Unique
+-- on the tooltip: that is the server's rule, read off our own bags, and it
+-- explains the missing roll rather than merely coexisting with it. A disenchant
+-- product, a quest pickup or a fight's own hand-outs cannot pass it, because
+-- passing it means holding a unique copy of the thing already.
+--
+-- Rare and up on top of that, which is not the server's rule but ours. Unique
+-- whites and greens are quest and fight items -- the Vashj's Vial Remnants that
+-- half the raid is carrying -- and one of those being handed out is not a drop
+-- however unique it is.
+--
+-- One block, one name: the main chunk is nearly out of the two hundred locals
+-- Lua allows it, the same shortage the drop popup below is built around.
+do
+    local MIN_UNOFFERED = 3
+    local tip           -- the off-screen tooltip an item's Unique line is read from
+    local uniqueForms   -- and what that line looks like on this client
+
+    -- Everywhere the server counts copies from: bags, bank, and the slots we
+    -- are wearing, which GetItemCount leaves out.
+    local function Held(id)
+        local n = GetItemCount(id, true) or 0
+        for slot = 1, 19 do
+            if GetInventoryItemID("player", slot) == id then n = n + 1 end
+        end
+        return n
+    end
+
+    -- How many copies the item allows, or nil when it is not unique at all.
+    -- "Unique" and "Unique-Equipped" mean one; "Unique (3)" says so itself.
+    local function UniqueCap(link)
+        if not uniqueForms then
+            uniqueForms = {}
+            for _, name in ipairs({ "ITEM_UNIQUE", "ITEM_UNIQUE_EQUIPPABLE",
+                                    "ITEM_UNIQUE_MULTIPLE" }) do
+                -- named rather than referenced so a client without one of them
+                -- is a form left out instead of a Lua error
+                local fmt = _G[name]
+                if type(fmt) == "string" then
+                    -- "Unique (%d)" is the only one with a number in it, and it
+                    -- is the count. The other two are the line entire.
+                    uniqueForms[#uniqueForms + 1] =
+                        "^" .. fmt:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+                                  :gsub("%%%%d", "(%%d+)") .. "$"
+                end
+            end
+        end
+
+        if not tip then
+            tip = CreateFrame("GameTooltip", "AutoPassLootAnnouncerScan", nil,
+                              "GameTooltipTemplate")
+        end
+        -- ANCHOR_NONE and no owner on screen: this is read, never shown
+        tip:SetOwner(UIParent, "ANCHOR_NONE")
+        tip:ClearLines()
+        tip:SetHyperlink(link)
+
+        -- Unique sits in the item's header, a line or two down. Reading the
+        -- whole tooltip would pick up a set bonus or a use effect that happens
+        -- to mention the word.
+        for i = 1, math.min(tip:NumLines(), 5) do
+            local line = _G["AutoPassLootAnnouncerScanTextLeft" .. i]
+            local text = line and line:GetText()
+            if text then
+                for _, form in ipairs(uniqueForms) do
+                    local cap = text:match(form)
+                    if cap then return tonumber(cap) or 1 end
+                end
+            end
+        end
+    end
+
+    -- Whether this is a drop the server kept us out of rather than something
+    -- that never was one.
+    function LeftOutOfRoll(link, id, quality)
+        -- A log of what the group was offered has nothing to say about what we
+        -- pick up on our own, and a roll we could be left out of needs a group
+        -- to have happened in.
+        if not IsInGroup() then return false end
+        if (quality or 0) < MIN_UNOFFERED then return false end
+
+        -- The tooltip is the expensive half, so the cheap half goes first --
+        -- and an item we are not holding is not one we were kept out of.
+        local held = Held(id)
+        if held < 1 then return false end
+
+        local cap = UniqueCap(link)
+        if not cap or held < cap then return false end
+
+        Dbg("%s is unique and we hold %d of %d, so the roll left us out",
+            tostring(link), held, cap)
+        return true
+    end
+end
+
 -- winner nil means "this dropped, nobody has won it yet". `offered` is
 -- ProcessRoll saying the server has just put this item up for a roll, which is
 -- the one moment anything can be sure it is a drop rather than a disenchant.
@@ -1421,6 +1520,9 @@ function LogDrop(link, count, winner, offered)
                 end
             end
         end
+        -- and last, the drop we were deliberately not offered
+        if not known then known = LeftOutOfRoll(link, id, quality) end
+
         if not known then
             Dbg("nobody was offered %s, so it is not a drop", tostring(link))
             return
@@ -1466,109 +1568,6 @@ function LogDrop(link, count, winner, offered)
     LootChanged(entries[#entries])
 end
 
--- A roll the server never offered us still talks. Every group-loot roll writes
--- its progress to the loot channel -- who passed, who picked need, what they
--- rolled -- and those lines arrive whether or not we were in the roll. That is
--- the one thing that can see a unique item already in our own bags: the server
--- leaves us out of the roll for it entirely, so START_LOOT_ROLL never fires,
--- the drop gets no row, and the "receives loot" line that follows is turned
--- away as something nobody was offered. The rest of the group rolling on it in
--- front of us is the evidence that it dropped.
---
--- Only the shapes the loot system writes itself are matched, which keeps a
--- disenchant or a fight's own hand-outs out of the log for the same reason the
--- "receives loot" line alone is not trusted. Which shape it was does not
--- matter and nor does who said it -- the roll's own business -- so the item is
--- the only thing taken out.
---
--- Reading and logging arrive as one block because the main chunk is nearly out
--- of the two hundred locals Lua allows it, so a subsystem gets one name rather
--- than one per part -- the same shortage the drop popup below is built around.
-do
-    -- Held by name rather than by reference so that a client without one of
-    -- them is a form left out instead of a Lua error, which is what makes it
-    -- safe to list the ones only later expansions have.
-    local FORMS = {
-        "LOOT_ROLL_ALL_PASSED",
-        "LOOT_ROLL_DISENCHANT", "LOOT_ROLL_DISENCHANT_SELF",
-        "LOOT_ROLL_GREED", "LOOT_ROLL_GREED_SELF",
-        "LOOT_ROLL_NEED", "LOOT_ROLL_NEED_SELF",
-        "LOOT_ROLL_PASSED", "LOOT_ROLL_PASSED_SELF",
-        "LOOT_ROLL_PASSED_AUTO", "LOOT_ROLL_PASSED_AUTO_FEMALE",
-        "LOOT_ROLL_PASSED_SELF_AUTO",
-        "LOOT_ROLL_ROLLED_DE", "LOOT_ROLL_ROLLED_GREED", "LOOT_ROLL_ROLLED_NEED",
-        "LOOT_ROLL_STILL_ROLLING",
-        -- LOOT_ROLL_WON and LOOT_ROLL_YOU_WON are deliberately not here. They
-        -- are the end of a roll rather than the offer of one, so by the time
-        -- one arrives the drop is logged already -- and they can land after
-        -- the winner has, which would read as a fresh offer and file the same
-        -- drop twice.
-    }
-    local pats
-
-    -- The item a roll line is about, or nil when the line is not one.
-    local function RolledItem(msg)
-        -- Most of what comes down the loot channel has no item in it at all,
-        -- and none of these forms is worth a pattern run without one.
-        if not msg:find("|Hitem:", 1, true) then return end
-
-        if not pats then
-            pats = {}
-            for _, name in ipairs(FORMS) do
-                local fmt = _G[name]
-                if type(fmt) == "string" then pats[#pats + 1] = ToPattern(fmt) end
-            end
-        end
-
-        for _, p in ipairs(pats) do
-            -- The forms with two placeholders put the roller and the item in
-            -- either order, so the item is picked out by being the one that is
-            -- an item rather than by where it sits.
-            for _, cap in ipairs({ msg:match(p) }) do
-                -- Trimmed to the link rather than taken whole: the forms are
-                -- tried in list order and a shorter one can match first with
-                -- the rest of the sentence swept into the capture. "%s passed
-                -- on: %s" takes the automatic-pass line that way, and keeps
-                -- "because they cannot loot that item" along with the item.
-                local link = type(cap) == "string" and cap:match(ITEM_LINK)
-                if link then return link end
-            end
-        end
-    end
-
-    -- A loot line that is not somebody receiving an item. One row for the whole
-    -- roll: a raid writes a line per member and they all mean the same drop, so
-    -- the first to arrive files it and every line after it finds that row still
-    -- waiting for a winner and leaves it alone.
-    --
-    -- Rows the usual way in already made are found by that same test, so a drop
-    -- we were offered ourselves is logged once, there, exactly as before. A row
-    -- that already has its winner is a roll that is over, and a second one of
-    -- the same item is a second drop, which is what it gets.
-    function LogRollLine(msg)
-        local link = RolledItem(msg)
-        if not link then return end
-
-        local id = ItemID(link)
-        if not id then return end
-
-        for _, e in ipairs(db.loot.entries) do
-            if e.id == id and not e.winner
-                and (time() - e.t)
-                    <= (e.announced and ANNOUNCED_MATCH_WINDOW or LOOT_MATCH_WINDOW) then
-                rolled[id] = time()   -- and it is still on offer, so say so
-                return
-            end
-        end
-
-        -- How many dropped is the roll's to say and a roll line never does, so
-        -- the row goes in as one and the loot message corrects it the way an
-        -- announced row is corrected.
-        Dbg("rolled on but never offered to us: %s", tostring(link))
-        LogDrop(link, nil, nil, true)
-    end
-end
-
 ----------------------------------------------------------------
 -- What the loot addons announce
 ----------------------------------------------------------------
@@ -1584,6 +1583,7 @@ end
 -- raider linking an item to ask who needs it is not an announcement and is left
 -- alone, which is the whole reason for matching shapes instead of every link
 -- that goes past.
+local ITEM_LINK   = "|c%x+|Hitem:.-|h.-|h|r"
 local GARGUL_SAID = "^%s*(.-)Gargul%s*:%s*(.+)$"
 
 -- Gargul stamps a raid marker in front of its name. That reaches us as the
@@ -5222,15 +5222,8 @@ f:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         StoreActive()
 
     elseif event == "CHAT_MSG_LOOT" then
-        local msg = arg1 or ""
-        local link, count, who = ParseLoot(msg)
-        if link then
-            LogDrop(link, count, who)
-        else
-            -- not somebody receiving an item, so it may be the group
-            -- rolling for one -- including one we were never offered
-            LogRollLine(msg)
-        end
+        local link, count, who = ParseLoot(arg1 or "")
+        if link then LogDrop(link, count, who) end
 
     elseif event == "CHAT_MSG_MONEY" then
         LogMoney(MoneyFromText(arg1 or ""))

@@ -1,24 +1,36 @@
 # Changelog
 
+## [1.12.4] - 2026-09-16
+
+### Fixed
+- **A unique item you already own went unlogged when it dropped.** The server
+  does not offer you a roll on one -- there is no roll window, no
+  `START_LOOT_ROLL`, and, because a roll's progress is only sent to the players
+  in it, nothing in your loot channel about the rolling either. The whole of
+  the evidence is the winner's `receives loot` line, which the log will not
+  trust on its own: it cannot tell a drop from a disenchant, a quest pickup or
+  a fight's own hand-outs, which is why it is anchored on the roll instead. So
+  the item never appeared -- not in the loot window, not in the popup, not in
+  the session details -- and the drop you would most want a record of was the
+  one drop the night's log was missing.
+  That line is let through now when the addon can show why it was left out:
+  you are holding that exact item, the tooltip says Unique, and it is rare
+  quality or better. That is the server's own rule read off your own bags, so
+  it explains the missing roll rather than merely coexisting with it, and
+  nothing else is loosened -- getting in this way means already holding a
+  unique copy of the thing. The rare floor is the addon's own, and keeps out
+  the unique whites and greens that quests and fight mechanics hand around.
+
 ## [1.12.3] - 2026-09-16
 
 ### Fixed
-- **A drop you were not offered a roll on went unlogged.** The server leaves
-  you out of the roll for a unique item you already own -- no roll window, no
-  `START_LOOT_ROLL` -- and the log hangs a row on that event, so the item never
-  appeared: not in the loot window, not in the popup, not in the session
-  details. Worse, the `receives loot` line that followed was turned away as
-  something nobody had been offered, so even the winner went unrecorded, and
-  the one drop you most want a record of -- a boss item you cannot take --
-  was the one drop the night's log was missing. The roll itself is still
-  announced to the group a line at a time, and those lines arrive whether or
-  not you are in the roll, so they are read now: who passed, who picked need,
-  what they rolled, and the automatic pass the server makes for anyone who
-  cannot loot the item. The first line of a roll files the drop and the rest
-  find that row and leave it alone, so a raid's worth of pass messages is one
-  row, and a drop you *were* offered is logged exactly as before rather than
-  twice. Only the shapes the loot system writes itself are read, so a
-  disenchant, a quest pickup or a fight's own hand-outs still cannot get in.
+- Nothing, as it turned out. This release read the group's roll lines out of
+  the loot channel -- who passed, who picked need, what they rolled -- to catch
+  a drop the server had never offered us a roll on, on the belief that those
+  lines arrive whether or not we are in the roll. They do not: a roll's progress
+  goes only to the players in it, so for the one drop this was meant to catch
+  there is nothing in the loot channel to read but the winner's `receives loot`
+  line. The code never fired and is gone again. 1.12.4 has the real fix.
 
 ## [1.12.2] - 2026-09-12
 
