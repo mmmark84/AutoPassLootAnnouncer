@@ -343,8 +343,11 @@ That rule exists because `CHAT_MSG_LOOT` cannot tell a drop from anything else t
 | The green the party rolled on | **Yes** |
 | A stack of Nether Vortex someone won | **Yes** |
 | A tier token the master looter handed out | **Yes**, if a loot addon announced it |
+| A unique item you already own, rolled for without you | **Yes** — see below |
 
 So `START_LOOT_ROLL` is what makes an item loggable and the loot message only says who ended up with it. An item stays loggable for ten minutes after it is offered, which covers the roll's two minutes and the wait for someone to loot the corpse.
+
+**A roll you were left out of still counts.** The server does not offer you a roll on a unique item you already own — no window, no `START_LOOT_ROLL`, nothing for a row to hang on — but the rest of the group rolls for it in front of you, a line at a time, in the same loot channel: who passed, who picked need, what they rolled. Those lines are the loot system's own and nothing else writes them, so an item in one is an item the group was offered, and it is logged on the first of them. That is one row for the whole roll however many people it takes, and the same row a normal drop would have got, so nothing is listed twice.
 
 The roll says how many dropped as well as what did, so a stack is a drop like any other: logged when it drops with no name beside it, carrying the number that dropped, and a name once somebody loots it. Ten hearts off a night of trash are ten entries rather than one running total — which is what lets the popup say `x2` for the two that just dropped while the loot window adds them up per winner.
 

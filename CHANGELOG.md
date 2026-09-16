@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.12.3] - 2026-09-16
+
+### Fixed
+- **A drop you were not offered a roll on went unlogged.** The server leaves
+  you out of the roll for a unique item you already own -- no roll window, no
+  `START_LOOT_ROLL` -- and the log hangs a row on that event, so the item never
+  appeared: not in the loot window, not in the popup, not in the session
+  details. Worse, the `receives loot` line that followed was turned away as
+  something nobody had been offered, so even the winner went unrecorded, and
+  the one drop you most want a record of -- a boss item you cannot take --
+  was the one drop the night's log was missing. The roll itself is still
+  announced to the group a line at a time, and those lines arrive whether or
+  not you are in the roll, so they are read now: who passed, who picked need,
+  what they rolled, and the automatic pass the server makes for anyone who
+  cannot loot the item. The first line of a roll files the drop and the rest
+  find that row and leave it alone, so a raid's worth of pass messages is one
+  row, and a drop you *were* offered is logged exactly as before rather than
+  twice. Only the shapes the loot system writes itself are read, so a
+  disenchant, a quest pickup or a fight's own hand-outs still cannot get in.
+
 ## [1.12.2] - 2026-09-12
 
 ### Fixed
